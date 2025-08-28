@@ -3,160 +3,310 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Test</title>
+    <title>Test Sayfası - Ekran Paylaşım</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
             padding: 20px;
-            background-color: #f5f5f5;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
         }
         .container {
-            background: white;
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
             padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .test-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            margin: 20px 0;
             border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
-        .status {
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .warning {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
-        button {
-            background-color: #007bff;
+        .test-button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
             color: white;
             border: none;
             padding: 12px 24px;
-            font-size: 16px;
-            border-radius: 5px;
+            border-radius: 25px;
             cursor: pointer;
-            margin: 10px 5px;
+            font-size: 16px;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
         }
-        button:hover {
-            background-color: #0056b3;
+        .test-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
-        #video {
-            width: 100%;
-            max-width: 400px;
-            height: auto;
-            border: 2px solid #ddd;
-            border-radius: 5px;
-            margin: 20px auto;
-            display: block;
+        .status {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: monospace;
+        }
+        .nav-links {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 15px;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 25px;
+            transition: all 0.3s ease;
+        }
+        .nav-links a:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .feature-list li:before {
+            content: "✅ ";
+            margin-right: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔧 WebRTC Test Sayfası</h1>
+        <h1>🧪 Test Sayfası</h1>
         
-        <div id="results"></div>
-        
-        <div style="text-align: center;">
-            <button onclick="testWebRTC()">🧪 WebRTC Test Et</button>
-            <button onclick="testScreenShare()">📺 Ekran Paylaşım Test Et</button>
+        <div class="nav-links">
+            <a href="/">📺 Yayıncı</a>
+            <a href="/watch">👁️ İzleyici</a>
+            <a href="/test">🧪 Test</a>
         </div>
-        
-        <video id="video" autoplay muted></video>
+
+        <div class="test-section">
+            <h3>🔧 Sistem Testleri</h3>
+            <button class="test-button" onclick="testWebRTC()">WebRTC Test</button>
+            <button class="test-button" onclick="testSocketIO()">Socket.IO Test</button>
+            <button class="test-button" onclick="testMediaDevices()">Media Devices Test</button>
+            <button class="test-button" onclick="testBrowser()">Tarayıcı Test</button>
+        </div>
+
+        <div class="test-section">
+            <h3>📊 Test Sonuçları</h3>
+            <div id="testResults" class="status">
+                Testleri başlatmak için yukarıdaki butonlara tıklayın...
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>✨ Özellikler</h3>
+            <ul class="feature-list">
+                <li>1080p 60fps ekran paylaşımı</li>
+                <li>Çoklu tarayıcı desteği</li>
+                <li>Mobil uyumlu tasarım</li>
+                <li>Otomatik yeniden bağlanma</li>
+                <li>Gelişmiş hata yönetimi</li>
+                <li>STUN/TURN server desteği</li>
+                <li>Gerçek zamanlı kalite bilgisi</li>
+                <li>Touch gesture desteği</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h3>🌐 Bağlantı Durumu</h3>
+            <div id="connectionStatus" class="status">
+                Bağlantı kontrol ediliyor...
+            </div>
+        </div>
     </div>
 
     <script>
-        const resultsDiv = document.getElementById('results');
-        const video = document.getElementById('video');
-
-        function addResult(message, type) {
-            const div = document.createElement('div');
-            div.className = `status ${type}`;
-            div.textContent = message;
-            resultsDiv.appendChild(div);
-        }
-
-        function testWebRTC() {
-            resultsDiv.innerHTML = '';
+        // Test sonuçlarını gösterme fonksiyonu
+        function showResult(message, type = 'info') {
+            const resultsDiv = document.getElementById('testResults');
+            const timestamp = new Date().toLocaleTimeString();
+            const result = `[${timestamp}] ${message}\n`;
             
-            // Test 1: WebRTC API support
-            if (typeof RTCPeerConnection !== 'undefined') {
-                addResult('✅ RTCPeerConnection API destekleniyor', 'success');
+            if (type === 'error') {
+                resultsDiv.innerHTML += `<span style="color: #ff6b6b;">❌ ${result}</span>`;
+            } else if (type === 'success') {
+                resultsDiv.innerHTML += `<span style="color: #51cf66;">✅ ${result}</span>`;
             } else {
-                addResult('❌ RTCPeerConnection API desteklenmiyor', 'error');
-                return;
+                resultsDiv.innerHTML += `<span style="color: #74c0fc;">ℹ️ ${result}</span>`;
             }
-
-            // Test 2: MediaDevices API
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                addResult('✅ MediaDevices API destekleniyor', 'success');
-            } else {
-                addResult('❌ MediaDevices API desteklenmiyor', 'error');
-                return;
-            }
-
-            // Test 3: GetDisplayMedia API
-            if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-                addResult('✅ getDisplayMedia API destekleniyor', 'success');
-            } else {
-                addResult('❌ getDisplayMedia API desteklenmiyor', 'error');
-            }
-
-            // Test 4: WebRTC Configuration
-            try {
-                const pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                });
-                addResult('✅ WebRTC PeerConnection oluşturuldu', 'success');
-                pc.close();
-            } catch (error) {
-                addResult('❌ WebRTC PeerConnection hatası: ' + error.message, 'error');
-            }
-
-            // Test 5: Browser Info
-            addResult(`ℹ️ Tarayıcı: ${navigator.userAgent}`, 'warning');
+            
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
         }
 
-        async function testScreenShare() {
+        // WebRTC test
+        function testWebRTC() {
+            showResult('WebRTC testi başlatılıyor...');
+            
             try {
-                addResult('🔄 Ekran paylaşımı test ediliyor...', 'warning');
-                
-                const stream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { cursor: 'always' },
-                    audio: false
-                });
-                
-                video.srcObject = stream;
-                addResult('✅ Ekran paylaşımı başarılı!', 'success');
-                
-                // Stop after 5 seconds
-                setTimeout(() => {
-                    stream.getTracks().forEach(track => track.stop());
-                    video.srcObject = null;
-                    addResult('⏹️ Ekran paylaşımı durduruldu', 'warning');
-                }, 5000);
-                
+                if (typeof RTCPeerConnection !== 'undefined') {
+                    const pc = new RTCPeerConnection();
+                    showResult('RTCPeerConnection oluşturuldu', 'success');
+                    
+                    if (typeof RTCSessionDescription !== 'undefined') {
+                        showResult('RTCSessionDescription mevcut', 'success');
+                    } else {
+                        showResult('RTCSessionDescription bulunamadı', 'error');
+                    }
+                    
+                    if (typeof RTCIceCandidate !== 'undefined') {
+                        showResult('RTCIceCandidate mevcut', 'success');
+                    } else {
+                        showResult('RTCIceCandidate bulunamadı', 'error');
+                    }
+                    
+                    pc.close();
+                    showResult('WebRTC testi tamamlandı', 'success');
+                } else {
+                    showResult('WebRTC desteklenmiyor', 'error');
+                }
             } catch (error) {
-                addResult('❌ Ekran paylaşımı hatası: ' + error.message, 'error');
+                showResult(`WebRTC test hatası: ${error.message}`, 'error');
             }
         }
 
-        // Auto test on page load
+        // Socket.IO test
+        function testSocketIO() {
+            showResult('Socket.IO testi başlatılıyor...');
+            
+            try {
+                if (typeof io !== 'undefined') {
+                    showResult('Socket.IO kütüphanesi mevcut', 'success');
+                    
+                    // Socket.IO bağlantı testi
+                    const socket = io();
+                    
+                    socket.on('connect', () => {
+                        showResult('Socket.IO bağlantısı başarılı', 'success');
+                        socket.disconnect();
+                    });
+                    
+                    socket.on('connect_error', (error) => {
+                        showResult(`Socket.IO bağlantı hatası: ${error.message}`, 'error');
+                    });
+                    
+                    setTimeout(() => {
+                        if (socket.connected) {
+                            showResult('Socket.IO testi tamamlandı', 'success');
+                        } else {
+                            showResult('Socket.IO bağlantı zaman aşımı', 'error');
+                        }
+                    }, 3000);
+                } else {
+                    showResult('Socket.IO kütüphanesi bulunamadı', 'error');
+                }
+            } catch (error) {
+                showResult(`Socket.IO test hatası: ${error.message}`, 'error');
+            }
+        }
+
+        // Media Devices test
+        async function testMediaDevices() {
+            showResult('Media Devices testi başlatılıyor...');
+            
+            try {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    showResult('getUserMedia API mevcut', 'success');
+                    
+                    if (navigator.mediaDevices.getDisplayMedia) {
+                        showResult('getDisplayMedia API mevcut', 'success');
+                    } else {
+                        showResult('getDisplayMedia API bulunamadı', 'error');
+                    }
+                    
+                    // Kamera testi
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        showResult('Kamera erişimi başarılı', 'success');
+                        stream.getTracks().forEach(track => track.stop());
+                    } catch (error) {
+                        showResult(`Kamera erişimi hatası: ${error.message}`, 'error');
+                    }
+                    
+                    showResult('Media Devices testi tamamlandı', 'success');
+                } else {
+                    showResult('Media Devices API desteklenmiyor', 'error');
+                }
+            } catch (error) {
+                showResult(`Media Devices test hatası: ${error.message}`, 'error');
+            }
+        }
+
+        // Tarayıcı test
+        function testBrowser() {
+            showResult('Tarayıcı testi başlatılıyor...');
+            
+            const userAgent = navigator.userAgent;
+            showResult(`User Agent: ${userAgent}`, 'info');
+            
+            // Tarayıcı tespiti
+            if (userAgent.includes('Chrome')) {
+                showResult('Chrome tarayıcısı tespit edildi', 'success');
+            } else if (userAgent.includes('Firefox')) {
+                showResult('Firefox tarayıcısı tespit edildi', 'success');
+            } else if (userAgent.includes('Safari')) {
+                showResult('Safari tarayıcısı tespit edildi', 'success');
+            } else if (userAgent.includes('Edge')) {
+                showResult('Edge tarayıcısı tespit edildi', 'success');
+            } else {
+                showResult('Bilinmeyen tarayıcı', 'error');
+            }
+            
+            // Mobil tespiti
+            if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)) {
+                showResult('Mobil cihaz tespit edildi', 'success');
+            } else {
+                showResult('Masaüstü cihaz tespit edildi', 'success');
+            }
+            
+            // Ekran bilgisi
+            showResult(`Ekran çözünürlüğü: ${screen.width}x${screen.height}`, 'info');
+            showResult(`Viewport: ${window.innerWidth}x${window.innerHeight}`, 'info');
+            
+            showResult('Tarayıcı testi tamamlandı', 'success');
+        }
+
+        // Bağlantı durumu kontrolü
+        function checkConnection() {
+            const statusDiv = document.getElementById('connectionStatus');
+            
+            if (navigator.onLine) {
+                statusDiv.innerHTML = '🌐 Çevrimiçi - İnternet bağlantısı mevcut';
+                statusDiv.style.color = '#51cf66';
+            } else {
+                statusDiv.innerHTML = '❌ Çevrimdışı - İnternet bağlantısı yok';
+                statusDiv.style.color = '#ff6b6b';
+            }
+        }
+
+        // Sayfa yüklendiğinde
         window.addEventListener('load', () => {
-            addResult('🚀 Sayfa yüklendi, test başlatılıyor...', 'warning');
-            setTimeout(testWebRTC, 1000);
+            showResult('Test sayfası yüklendi', 'success');
+            checkConnection();
+            
+            // Bağlantı durumu değişikliklerini dinle
+            window.addEventListener('online', checkConnection);
+            window.addEventListener('offline', checkConnection);
         });
     </script>
 </body>

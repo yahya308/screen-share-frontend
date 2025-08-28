@@ -2,88 +2,331 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Ekran Paylaşımı - Yayıncı</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
             background-color: #f5f5f5;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
+        
         .container {
+            max-width: 100%;
+            margin: 0 auto;
             background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-height: 100vh;
+            padding: 20px;
         }
+        
+        @media (min-width: 768px) {
+            .container {
+                max-width: 800px;
+                margin: 20px auto;
+                border-radius: 15px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                min-height: auto;
+            }
+        }
+        
         h1 {
             color: #333;
             text-align: center;
-            margin-bottom: 30px;
+            margin: 0 0 20px 0;
+            font-size: 1.8rem;
+            font-weight: 700;
         }
+        
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 1.5rem;
+                margin-bottom: 15px;
+            }
+        }
+        
         .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 10px;
             text-align: center;
-            font-weight: bold;
+            font-weight: 600;
+            font-size: 0.95rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
+        
         .status.connected {
-            background-color: #d4edda;
+            background: linear-gradient(135deg, #d4edda, #c3e6cb);
             color: #155724;
             border: 1px solid #c3e6cb;
         }
+        
         .status.disconnected {
-            background-color: #f8d7da;
+            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+        
         .status.waiting {
-            background-color: #fff3cd;
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
             color: #856404;
             border: 1px solid #ffeaa7;
         }
-        button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 10px 5px;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        button:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
-        }
-        button.stop {
-            background-color: #dc3545;
-        }
-        button.stop:hover {
-            background-color: #c82333;
-        }
-        #localVideo {
-            width: 100%;
-            max-width: 600px;
-            height: auto;
-            border: 2px solid #ddd;
-            border-radius: 5px;
-            margin: 20px auto;
-            display: block;
-        }
+        
         .info {
-            background-color: #e7f3ff;
-            padding: 15px;
-            border-radius: 5px;
+            background: linear-gradient(135deg, #e7f3ff, #d1ecf1);
+            padding: 20px;
+            border-radius: 12px;
             margin: 20px 0;
             border-left: 4px solid #007bff;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .quality-controls {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            border: 1px solid #dee2e6;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .quality-controls h3 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        @media (min-width: 480px) {
+            .control-group {
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+            }
+        }
+        
+        .control-group label {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-weight: 600;
+            color: #495057;
+            min-width: 120px;
+        }
+        
+        .control-group select, .control-group input {
+            padding: 12px;
+            border: 2px solid #ced4da;
+            border-radius: 8px;
+            font-size: 1rem;
+            background: white;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            min-width: 140px;
+        }
+        
+        .control-group select:focus, .control-group input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        }
+        
+        .browser-info {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #ffc107;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        
+        .button-container {
+            text-align: center;
+            margin: 25px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        @media (min-width: 480px) {
+            .button-container {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+        
+        button {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            margin: 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+            min-width: 200px;
+            touch-action: manipulation;
+        }
+        
+        button:hover {
+            background: linear-gradient(135deg, #0056b3, #004085);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,123,255,0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background: linear-gradient(135deg, #6c757d, #5a6268);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 8px rgba(108,117,125,0.3);
+        }
+        
+        button.stop {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            box-shadow: 0 4px 15px rgba(220,53,69,0.3);
+        }
+        
+        button.stop:hover {
+            background: linear-gradient(135deg, #c82333, #a71e2a);
+            box-shadow: 0 6px 20px rgba(220,53,69,0.4);
+        }
+        
+        #localVideo {
+            width: 100%;
+            max-width: 100%;
+            height: auto;
+            border: 3px solid #ddd;
+            border-radius: 12px;
+            margin: 20px auto;
+            display: block;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            background-color: #000;
+        }
+        
+        @media (min-width: 768px) {
+            #localVideo {
+                max-width: 600px;
+            }
+        }
+        
+        .mobile-tips {
+            background: linear-gradient(135deg, #e8f5e8, #d4edda);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #28a745;
+            font-size: 0.85rem;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-tips {
+                display: block;
+            }
+        }
+        
+        .mobile-tips h4 {
+            margin: 0 0 10px 0;
+            color: #155724;
+            font-size: 1rem;
+        }
+        
+        .mobile-tips ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .mobile-tips li {
+            margin: 5px 0;
+            color: #155724;
+        }
+        
+        /* Touch-friendly improvements */
+        @media (max-width: 768px) {
+            button {
+                padding: 18px 24px;
+                font-size: 1.2rem;
+                min-width: 180px;
+                border-radius: 15px;
+            }
+            
+            .control-group select, .control-group input {
+                padding: 15px;
+                font-size: 1.1rem;
+                border-radius: 10px;
+            }
+            
+            .quality-controls, .info {
+                padding: 25px;
+                margin: 25px 0;
+            }
+        }
+        
+        /* Loading animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #1a1a1a;
+                color: #ffffff;
+            }
+            
+            .container {
+                background: #2d2d2d;
+            }
+            
+            .info, .quality-controls, .browser-info, .mobile-tips {
+                background: #3d3d3d;
+                color: #ffffff;
+            }
+            
+            .control-group select, .control-group input {
+                background: #4d4d4d;
+                color: #ffffff;
+                border-color: #5d5d5d;
+            }
         }
     </style>
 </head>
@@ -93,21 +336,58 @@
         
         <div class="info">
             <strong>Nasıl kullanılır:</strong><br>
-            1. "Ekranını Paylaş" butonuna tıkla<br>
-            2. Paylaşmak istediğin ekranı seç<br>
-            3. İzleyici <a href="/watch" target="_blank">bu linke</a> tıklayarak bağlanabilir
+            1. Kalite ayarlarını yapın (1080p 60fps önerilen)<br>
+            2. "Ekranını Paylaş" butonuna tıklayın<br>
+            3. Paylaşmak istediğiniz ekranı seçin<br>
+            4. İzleyici <a href="/watch" target="_blank">bu linke</a> tıklayarak bağlanabilir
+        </div>
+
+        <div class="quality-controls">
+            <h3>🎛️ Kalite Ayarları</h3>
+            <div class="control-group">
+                <label>📱 Çözünürlük:
+                    <select id="resolution">
+                        <option value="1920x1080">1920x1080 (Full HD)</option>
+                        <option value="1280x720">1280x720 (HD)</option>
+                        <option value="854x480">854x480 (SD)</option>
+                    </select>
+                </label>
+                <label>🎬 FPS:
+                    <select id="fps">
+                        <option value="60">60 FPS</option>
+                        <option value="30">30 FPS</option>
+                        <option value="24">24 FPS</option>
+                    </select>
+                </label>
+                <label>⚡ Bitrate:
+                    <input type="number" id="bitrate" value="8000" min="1000" max="20000" step="1000" placeholder="8000">
+                    <span style="font-size: 0.8rem; color: #6c757d;">kbps</span>
+                </label>
+            </div>
+        </div>
+
+        <div id="browserInfo" class="browser-info"></div>
+
+        <div id="mobileTips" class="mobile-tips">
+            <h4>📱 Mobil İpuçları:</h4>
+            <ul>
+                <li>Ekran paylaşımı için tarayıcı izinlerini verin</li>
+                <li>Yatay modda daha iyi deneyim için telefonu çevirin</li>
+                <li>WiFi bağlantısı kullanarak daha iyi kalite elde edin</li>
+                <li>Parmak hareketleri ile video kontrollerini kullanın</li>
+            </ul>
         </div>
 
         <div id="status" class="status disconnected">
             Bağlantı bekleniyor...
         </div>
 
-        <div style="text-align: center;">
+        <div class="button-container">
             <button id="shareButton">📺 Ekranını Paylaş</button>
             <button id="stopButton" class="stop" disabled>⏹️ Paylaşımı Durdur</button>
         </div>
 
-        <video id="localVideo" autoplay muted></video>
+        <video id="localVideo" autoplay muted playsinline></video>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -117,33 +397,144 @@
         const stopButton = document.getElementById('stopButton');
         const localVideo = document.getElementById('localVideo');
         const statusDiv = document.getElementById('status');
+        const browserInfoDiv = document.getElementById('browserInfo');
+        const resolutionSelect = document.getElementById('resolution');
+        const fpsSelect = document.getElementById('fps');
+        const bitrateInput = document.getElementById('bitrate');
 
         let localStream = null;
         let peerConnection = null;
         let isBroadcasting = false;
 
-        // WebRTC configuration
+        // Mobile detection
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+        // Browser detection and compatibility check
+        function detectBrowser() {
+            const userAgent = navigator.userAgent;
+            let browser = 'Unknown';
+            let isSupported = false;
+            let mobileInfo = '';
+            
+            if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) {
+                browser = 'Chrome';
+                isSupported = true;
+            } else if (userAgent.includes('Firefox')) {
+                browser = 'Firefox';
+                isSupported = true;
+            } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+                browser = 'Safari';
+                isSupported = true;
+            } else if (userAgent.includes('Edg')) {
+                browser = 'Edge';
+                isSupported = true;
+            }
+            
+            if (isMobile) {
+                mobileInfo = ' (Mobil)';
+                if (isIOS) {
+                    mobileInfo += ' - iOS';
+                } else {
+                    mobileInfo += ' - Android';
+                }
+            }
+            
+            const info = `🌐 Tarayıcı: ${browser}${mobileInfo} - ${isSupported ? '✅ Destekleniyor' : '⚠️ Test edilmedi'}`;
+            browserInfoDiv.innerHTML = info;
+            
+            return { browser, isSupported };
+        }
+
+        // WebRTC configuration with better STUN/TURN servers
         const configuration = {
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
         };
+
+        // Get video constraints based on selected quality and device capabilities
+        function getVideoConstraints() {
+            const resolution = resolutionSelect.value;
+            const fps = parseInt(fpsSelect.value);
+            const [width, height] = resolution.split('x').map(Number);
+            
+            // Mobile-specific constraints
+            if (isMobile) {
+                return {
+                    video: {
+                        width: { ideal: Math.min(width, 1280), max: width },
+                        height: { ideal: Math.min(height, 720), max: height },
+                        frameRate: { ideal: Math.min(fps, 30), max: fps },
+                        cursor: 'always',
+                        displaySurface: 'monitor',
+                        logicalSurface: true
+                    },
+                    audio: false
+                };
+            }
+            
+            return {
+                video: {
+                    width: { ideal: width, max: width },
+                    height: { ideal: height, max: height },
+                    frameRate: { ideal: fps, max: fps },
+                    cursor: 'always',
+                    displaySurface: 'monitor',
+                    logicalSurface: true
+                },
+                audio: false
+            };
+        }
 
         // Update status display
         function updateStatus(message, type) {
-            statusDiv.textContent = message;
+            statusDiv.innerHTML = type === 'waiting' ? 
+                `<span class="loading"></span>${message}` : 
+                message;
             statusDiv.className = `status ${type}`;
         }
 
-        // Initialize WebRTC connection
+        // Initialize WebRTC connection with better settings
         function initializePeerConnection() {
             console.log('Creating RTCPeerConnection for broadcaster...');
-            peerConnection = new RTCPeerConnection(configuration);
+            
+            // Enhanced configuration for better quality
+            const enhancedConfig = {
+                ...configuration,
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
+                iceTransportPolicy: 'all',
+                sdpSemantics: 'unified-plan'
+            };
+            
+            peerConnection = new RTCPeerConnection(enhancedConfig);
             console.log('RTCPeerConnection created successfully for broadcaster');
 
-            // Add local stream to peer connection
+            // Add local stream to peer connection with better track handling
             localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
+                const sender = peerConnection.addTrack(track, localStream);
+                
+                // Set better encoding parameters for video tracks
+                if (track.kind === 'video') {
+                    const params = sender.getParameters();
+                    if (params.encodings && params.encodings.length > 0) {
+                        // Mobile-specific bitrate adjustments
+                        let maxBitrate = parseInt(bitrateInput.value) * 1000;
+                        if (isMobile) {
+                            maxBitrate = Math.min(maxBitrate, 8000000); // Max 8Mbps for mobile
+                        }
+                        
+                        params.encodings[0].maxBitrate = maxBitrate;
+                        params.encodings[0].maxFramerate = parseInt(fpsSelect.value);
+                        sender.setParameters(params).catch(e => console.log('Could not set encoding parameters:', e));
+                    }
+                }
             });
 
             // Handle ICE candidates
@@ -157,27 +548,85 @@
             peerConnection.onconnectionstatechange = () => {
                 console.log('Connection state:', peerConnection.connectionState);
                 if (peerConnection.connectionState === 'connected') {
-                    updateStatus('İzleyici bağlandı!', 'connected');
+                    updateStatus('İzleyici bağlandı! 🎉', 'connected');
                 } else if (peerConnection.connectionState === 'disconnected') {
                     updateStatus('İzleyici bağlantısı kesildi', 'disconnected');
+                } else if (peerConnection.connectionState === 'failed') {
+                    updateStatus('Bağlantı başarısız', 'disconnected');
                 }
+            };
+
+            // Handle ICE connection state
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log('ICE connection state:', peerConnection.iceConnectionState);
+            };
+
+            // Handle signaling state
+            peerConnection.onsignalingstatechange = () => {
+                console.log('Signaling state:', peerConnection.signalingState);
             };
         }
 
-        // Start screen sharing
+        // Start screen sharing with enhanced quality and mobile support
         async function startSharing() {
             try {
                 updateStatus('Ekran seçiliyor...', 'waiting');
                 
-                localStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: {
-                        cursor: 'always'
-                    },
-                    audio: false
-                });
+                const constraints = getVideoConstraints();
+                console.log('Using constraints:', constraints);
+                
+                // Try to get display media with fallback options
+                let stream;
+                try {
+                    // Enhanced constraints for better tab/window selection
+                    const enhancedConstraints = {
+                        video: {
+                            ...constraints.video,
+                            displaySurface: ['monitor', 'window', 'tab'],
+                            logicalSurface: true,
+                            cursor: 'always',
+                            resizeMode: 'crop-and-scale'
+                        },
+                        audio: false,
+                        selfBrowserSurface: 'include',
+                        systemAudio: 'exclude'
+                    };
+                    
+                    console.log('Trying enhanced constraints:', enhancedConstraints);
+                    stream = await navigator.mediaDevices.getDisplayMedia(enhancedConstraints);
+                    
+                } catch (error) {
+                    console.log('Enhanced constraints failed, trying basic constraints:', error);
+                    try {
+                        // Fallback to basic constraints
+                        stream = await navigator.mediaDevices.getDisplayMedia({
+                            video: { 
+                                cursor: 'always',
+                                displaySurface: 'monitor'
+                            },
+                            audio: false
+                        });
+                    } catch (fallbackError) {
+                        console.log('Basic constraints also failed:', fallbackError);
+                        throw fallbackError;
+                    }
+                }
 
+                localStream = stream;
                 localVideo.srcObject = localStream;
-                updateStatus('Ekran paylaşımı başladı. İzleyici bekleniyor...', 'waiting');
+                
+                // Log stream details
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    const settings = videoTrack.getSettings();
+                    console.log('Video track settings:', settings);
+                    console.log('Video track constraints:', videoTrack.getConstraints());
+                    console.log('Video track capabilities:', videoTrack.getCapabilities());
+                    
+                    updateStatus(`Ekran paylaşımı başladı (${settings.width}x${settings.height} @ ${settings.frameRate}fps). İzleyici bekleniyor...`, 'waiting');
+                } else {
+                    updateStatus('Ekran paylaşımı başladı. İzleyici bekleniyor...', 'waiting');
+                }
                 
                 isBroadcasting = true;
                 shareButton.disabled = true;
@@ -190,21 +639,106 @@
                 console.log('Sending broadcaster event to server');
                 socket.emit('broadcaster');
 
-                // Handle stream end
-                localStream.getVideoTracks()[0].onended = () => {
-                    stopSharing();
-                };
+                // Enhanced stream end handling
+                localStream.getVideoTracks().forEach(track => {
+                    // Prevent automatic stopping
+                    track.addEventListener('ended', (event) => {
+                        console.log('Track ended event:', event);
+                        console.log('Track ended reason:', event.reason);
+                        
+                        // Only stop if user explicitly ended or error occurred
+                        if (event.reason === 'user' || event.reason === 'error') {
+                            console.log('Track ended by user or error, stopping broadcast');
+                            stopSharing();
+                        } else {
+                            console.log('Track ended for other reason, attempting to restart');
+                            // Try to restart the track
+                            setTimeout(() => {
+                                if (isBroadcasting && !localStream.active) {
+                                    console.log('Attempting to restart screen sharing');
+                                    startSharing();
+                                }
+                            }, 1000);
+                        }
+                    });
+                    
+                    // Handle track mute/unmute
+                    track.addEventListener('mute', () => {
+                        console.log('Video track muted');
+                    });
+                    
+                    track.addEventListener('unmute', () => {
+                        console.log('Video track unmuted');
+                    });
+                    
+                    // Handle track enabled/disabled
+                    track.addEventListener('enabled', () => {
+                        console.log('Video track enabled');
+                    });
+                    
+                    track.addEventListener('disabled', () => {
+                        console.log('Video track disabled');
+                    });
+                });
+
+                // Add visibility change handler to prevent stopping on tab switch
+                document.addEventListener('visibilitychange', handleVisibilityChange);
 
             } catch (error) {
                 console.error('Error starting screen share:', error);
-                updateStatus('Ekran paylaşımı başlatılamadı: ' + error.message, 'disconnected');
+                let errorMessage = 'Ekran paylaşımı başlatılamadı';
+                
+                if (error.name === 'NotAllowedError') {
+                    errorMessage += ': İzin reddedildi';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage += ': Ekran bulunamadı';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMessage += ': Bu tarayıcı ekran paylaşımını desteklemiyor';
+                } else if (error.name === 'NotReadableError') {
+                    errorMessage += ': Ekran okunamıyor (diğer uygulama kullanıyor olabilir)';
+                } else if (error.name === 'AbortError') {
+                    errorMessage += ': Ekran seçimi iptal edildi';
+                } else if (error.name === 'SecurityError') {
+                    errorMessage += ': Güvenlik hatası (HTTPS gerekli)';
+                } else {
+                    errorMessage += ': ' + error.message;
+                }
+                
+                updateStatus(errorMessage, 'disconnected');
+            }
+        }
+
+        // Handle visibility change to prevent stopping on tab switch
+        function handleVisibilityChange() {
+            if (document.hidden && isBroadcasting) {
+                console.log('Page hidden, but keeping broadcast active');
+                // Don't stop sharing when tab is hidden
+                // This prevents automatic stopping on tab switch
+            } else if (!document.hidden && isBroadcasting) {
+                console.log('Page visible again, broadcast continues');
+                // Page is visible again, broadcast should continue
             }
         }
 
         // Stop screen sharing
         function stopSharing() {
+            console.log('Stopping screen sharing...');
+            
+            // Remove visibility change handler
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            
             if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
+                localStream.getTracks().forEach(track => {
+                    // Remove all event listeners
+                    track.removeEventListener('ended', null);
+                    track.removeEventListener('mute', null);
+                    track.removeEventListener('unmute', null);
+                    track.removeEventListener('enabled', null);
+                    track.removeEventListener('disabled', null);
+                    
+                    // Stop the track
+                    track.stop();
+                });
                 localStream = null;
             }
             
@@ -221,9 +755,11 @@
             updateStatus('Ekran paylaşımı durduruldu', 'disconnected');
         }
 
-        // Event listeners
+        // Event listeners with touch support
         shareButton.addEventListener('click', startSharing);
+        shareButton.addEventListener('touchend', startSharing);
         stopButton.addEventListener('click', stopSharing);
+        stopButton.addEventListener('touchend', stopSharing);
 
         // Socket.IO event handlers
         socket.on('viewer', async () => {
@@ -232,7 +768,18 @@
             if (peerConnection && localStream) {
                 try {
                     console.log('Creating offer for viewer...');
-                    const offer = await peerConnection.createOffer();
+                    
+                    // Create offer with better options
+                    const offerOptions = {
+                        offerToReceiveAudio: false,
+                        offerToReceiveVideo: false
+                    };
+                    
+                    const offer = await peerConnection.createOffer(offerOptions);
+                    
+                    // Set codec preferences for better quality
+                    offer.sdp = offer.sdp.replace('useinbandfec=1', 'useinbandfec=1; stereo=1; maxaveragebitrate=128000');
+                    
                     await peerConnection.setLocalDescription(offer);
                     console.log('Offer created, sending to viewer');
                     socket.emit('offer', offer);
@@ -242,11 +789,8 @@
                 }
             } else {
                 console.log('PeerConnection or localStream not ready yet, will retry when ready');
-                // Don't emit viewer event again, just wait for next viewer connection
             }
         });
-
-
 
         socket.on('answer', async (answer) => {
             console.log('Received answer');
@@ -277,9 +821,79 @@
         // Handle page unload
         window.addEventListener('beforeunload', () => {
             if (isBroadcasting) {
+                console.log('Page unloading, stopping broadcast');
                 stopSharing();
             }
         });
+
+        // Handle page focus/blur to prevent stopping
+        window.addEventListener('focus', () => {
+            console.log('Window focused');
+            if (isBroadcasting && localStream) {
+                console.log('Broadcast active, checking stream status');
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack && !videoTrack.enabled) {
+                    console.log('Video track disabled, re-enabling');
+                    videoTrack.enabled = true;
+                }
+            }
+        });
+
+        window.addEventListener('blur', () => {
+            console.log('Window blurred');
+            // Don't stop sharing when window loses focus
+        });
+
+        // Check HTTPS requirement for WebRTC
+        function checkHTTPS() {
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                const warningDiv = document.createElement('div');
+                warningDiv.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    background: #ff6b6b;
+                    color: white;
+                    padding: 15px;
+                    text-align: center;
+                    z-index: 10000;
+                    font-weight: bold;
+                `;
+                warningDiv.innerHTML = '⚠️ WebRTC için HTTPS gerekli! Lütfen güvenli bağlantı kullanın.';
+                document.body.appendChild(warningDiv);
+                
+                // Disable share button
+                shareButton.disabled = true;
+                shareButton.title = 'HTTPS gerekli';
+                return false;
+            }
+            return true;
+        }
+
+        // Initialize browser detection and security checks
+        detectBrowser();
+        checkHTTPS();
+        
+        // Mobile-specific optimizations
+        if (isMobile) {
+            // Prevent zoom on double tap
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', function (event) {
+                const now = (new Date()).getTime();
+                if (now - lastTouchEnd <= 300) {
+                    event.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, false);
+            
+            // Optimize for mobile performance
+            if (isIOS) {
+                // iOS-specific optimizations
+                document.body.style.webkitUserSelect = 'none';
+                document.body.style.webkitTouchCallout = 'none';
+            }
+        }
     </script>
 </body>
 </html>
