@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #video {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin: 20px auto;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 WebRTC Test Sayfası</h1>
+        
+        <div id="results"></div>
+        
+        <div style="text-align: center;">
+            <button onclick="testWebRTC()">🧪 WebRTC Test Et</button>
+            <button onclick="testScreenShare()">📺 Ekran Paylaşım Test Et</button>
+        </div>
+        
+        <video id="video" autoplay muted></video>
+    </div>
+
+    <script>
+        const resultsDiv = document.getElementById('results');
+        const video = document.getElementById('video');
+
+        function addResult(message, type) {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+
+        function testWebRTC() {
+            resultsDiv.innerHTML = '';
+            
+            // Test 1: WebRTC API support
+            if (typeof RTCPeerConnection !== 'undefined') {
+                addResult('✅ RTCPeerConnection API destekleniyor', 'success');
+            } else {
+                addResult('❌ RTCPeerConnection API desteklenmiyor', 'error');
+                return;
+            }
+
+            // Test 2: MediaDevices API
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                addResult('✅ MediaDevices API destekleniyor', 'success');
+            } else {
+                addResult('❌ MediaDevices API desteklenmiyor', 'error');
+                return;
+            }
+
+            // Test 3: GetDisplayMedia API
+            if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                addResult('✅ getDisplayMedia API destekleniyor', 'success');
+            } else {
+                addResult('❌ getDisplayMedia API desteklenmiyor', 'error');
+            }
+
+            // Test 4: WebRTC Configuration
+            try {
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                addResult('✅ WebRTC PeerConnection oluşturuldu', 'success');
+                pc.close();
+            } catch (error) {
+                addResult('❌ WebRTC PeerConnection hatası: ' + error.message, 'error');
+            }
+
+            // Test 5: Browser Info
+            addResult(`ℹ️ Tarayıcı: ${navigator.userAgent}`, 'warning');
+        }
+
+        async function testScreenShare() {
+            try {
+                addResult('🔄 Ekran paylaşımı test ediliyor...', 'warning');
+                
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: 'always' },
+                    audio: false
+                });
+                
+                video.srcObject = stream;
+                addResult('✅ Ekran paylaşımı başarılı!', 'success');
+                
+                // Stop after 5 seconds
+                setTimeout(() => {
+                    stream.getTracks().forEach(track => track.stop());
+                    video.srcObject = null;
+                    addResult('⏹️ Ekran paylaşımı durduruldu', 'warning');
+                }, 5000);
+                
+            } catch (error) {
+                addResult('❌ Ekran paylaşımı hatası: ' + error.message, 'error');
+            }
+        }
+
+        // Auto test on page load
+        window.addEventListener('load', () => {
+            addResult('🚀 Sayfa yüklendi, test başlatılıyor...', 'warning');
+            setTimeout(testWebRTC, 1000);
+        });
+    </script>
+</body>
+</html>

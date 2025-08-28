@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ekran Paylaşımı - İzleyici</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.waiting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status.loading {
+            background-color: #e7f3ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+        }
+        #remoteVideo {
+            width: 100%;
+            max-width: 1000px;
+            height: auto;
+            min-height: 400px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            margin: 20px auto;
+            display: block;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            background-color: #000;
+        }
+        .video-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .info {
+            background-color: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+        }
+        .fullscreen-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+            transition: background-color 0.3s;
+        }
+        .fullscreen-btn:hover {
+            background-color: #218838;
+        }
+        .fullscreen-btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>👁️ Ekran Paylaşımı - İzleyici</h1>
+        
+        <div class="info">
+            <strong>Durum:</strong> Bu sayfa otomatik olarak yayıncıdan gelen ekran paylaşımını gösterecek.<br>
+            Yayıncı henüz paylaşım başlatmadıysa, lütfen bekleyin.
+        </div>
+
+        <div id="status" class="status waiting">
+            <span class="loading-spinner"></span>
+            Yayıncı bekleniyor...
+        </div>
+
+        <div class="video-container">
+            <video id="remoteVideo" autoplay muted playsinline></video>
+            <br>
+            <button id="fullscreenBtn" class="fullscreen-btn" disabled>🔍 Tam Ekran</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        console.log('Viewer page loaded');
+        const socket = io();
+        console.log('Socket.IO connected');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusDiv = document.getElementById('status');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+        let peerConnection = null;
+        let isConnected = false;
+
+        // WebRTC configuration
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        };
+
+        // Update status display
+        function updateStatus(message, type) {
+            statusDiv.innerHTML = type === 'loading' ? 
+                `<span class="loading-spinner"></span>${message}` : 
+                message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        // Initialize WebRTC connection
+        function initializePeerConnection() {
+            console.log('Creating RTCPeerConnection...');
+            peerConnection = new RTCPeerConnection(configuration);
+            console.log('RTCPeerConnection created successfully');
+
+                    // Handle incoming tracks
+        peerConnection.ontrack = (event) => {
+            console.log('Received remote stream');
+            console.log('Stream tracks:', event.streams[0].getTracks());
+            remoteVideo.srcObject = event.streams[0];
+            
+            // Try to play immediately and also set up a retry mechanism
+            console.log('Stream set to video element, attempting immediate play...');
+            
+            // Immediate play attempt
+            remoteVideo.play().then(() => {
+                console.log('Video started playing immediately');
+                isConnected = true;
+                fullscreenBtn.disabled = false;
+                updateStatus('Yayın bağlandı!', 'connected');
+            }).catch(error => {
+                console.log('Immediate play failed, will retry:', error.message);
+                console.log('Error name:', error.name);
+                console.log('Error details:', error);
+                
+                // Set up multiple retry attempts
+                let retryCount = 0;
+                const maxRetries = 5;
+                
+                const retryPlay = () => {
+                    retryCount++;
+                    console.log(`Retry attempt ${retryCount}/${maxRetries}...`);
+                    
+                    remoteVideo.play().then(() => {
+                        console.log(`Video started playing on retry ${retryCount}`);
+                        isConnected = true;
+                        fullscreenBtn.disabled = false;
+                        updateStatus('Yayın bağlandı!', 'connected');
+                    }).catch(error => {
+                        console.log(`Retry ${retryCount} failed:`, error.message);
+                        console.log(`Retry ${retryCount} error name:`, error.name);
+                        if (retryCount < maxRetries) {
+                            setTimeout(retryPlay, 1000);
+                        } else {
+                            console.error('All retry attempts failed');
+                        }
+                    });
+                };
+                
+                // Start retry after 1 second
+                setTimeout(retryPlay, 1000);
+            });
+        };
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', event.candidate);
+                }
+            };
+
+            // Handle connection state changes
+            peerConnection.onconnectionstatechange = () => {
+                console.log('Connection state:', peerConnection.connectionState);
+                if (peerConnection.connectionState === 'connected') {
+                    updateStatus('Yayın bağlandı!', 'connected');
+                    isConnected = true;
+                    fullscreenBtn.disabled = false;
+                } else if (peerConnection.connectionState === 'disconnected' || 
+                           peerConnection.connectionState === 'failed') {
+                    updateStatus('Yayın bağlantısı kesildi', 'disconnected');
+                    isConnected = false;
+                    fullscreenBtn.disabled = true;
+                }
+            };
+        }
+
+        // Fullscreen functionality
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                remoteVideo.requestFullscreen().catch(err => {
+                    console.error('Error attempting to enable fullscreen:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Event listeners
+        fullscreenBtn.addEventListener('click', toggleFullscreen);
+        
+        // Video event listeners for debugging
+        remoteVideo.addEventListener('loadedmetadata', () => {
+            console.log('Video metadata loaded');
+        });
+        
+        remoteVideo.addEventListener('canplay', () => {
+            console.log('Video can play - attempting to start playback');
+            // Video is ready, try to play
+            remoteVideo.play().then(() => {
+                console.log('Video started playing successfully');
+                isConnected = true;
+                fullscreenBtn.disabled = false;
+                updateStatus('Yayın bağlandı!', 'connected');
+            }).catch(error => {
+                console.error('Error playing video after canplay:', error);
+                updateStatus('Video oynatma hatası: ' + error.message, 'disconnected');
+            });
+        });
+        
+        remoteVideo.addEventListener('playing', () => {
+            console.log('Video is playing');
+        });
+        
+        remoteVideo.addEventListener('error', (e) => {
+            console.error('Video error:', e);
+        });
+        
+        // Add a timeout to check if video events are not firing
+        setTimeout(() => {
+            console.log('Checking video element state after 5 seconds...');
+            console.log('Video readyState:', remoteVideo.readyState);
+            console.log('Video networkState:', remoteVideo.networkState);
+            console.log('Video srcObject:', remoteVideo.srcObject);
+            console.log('Video paused:', remoteVideo.paused);
+            console.log('Video currentTime:', remoteVideo.currentTime);
+            console.log('Video duration:', remoteVideo.duration);
+            console.log('Video videoWidth:', remoteVideo.videoWidth);
+            console.log('Video videoHeight:', remoteVideo.videoHeight);
+            
+            if (remoteVideo.srcObject) {
+                console.log('Stream exists, attempting to force play...');
+                // Force play even if readyState is low
+                remoteVideo.play().then(() => {
+                    console.log('Video started playing manually');
+                    isConnected = true;
+                    fullscreenBtn.disabled = false;
+                    updateStatus('Yayın bağlandı!', 'connected');
+                }).catch(error => {
+                    console.error('Manual play failed:', error);
+                    console.error('Error name:', error.name);
+                    console.error('Error message:', error.message);
+                    
+                    // Try again after a short delay
+                    setTimeout(() => {
+                        console.log('Retrying manual play...');
+                        remoteVideo.play().then(() => {
+                            console.log('Video started playing on retry');
+                            isConnected = true;
+                            fullscreenBtn.disabled = false;
+                            updateStatus('Yayın bağlandı!', 'connected');
+                        }).catch(error2 => {
+                            console.error('Retry play failed:', error2);
+                            console.error('Retry error name:', error2.name);
+                            console.error('Retry error message:', error2.message);
+                        });
+                    }, 2000);
+                });
+            }
+        }, 5000);
+
+        // Socket.IO event handlers
+        socket.on('broadcaster', async () => {
+            console.log('Broadcaster detected, joining as viewer');
+            updateStatus('Yayıncı bulundu, bağlanılıyor...', 'loading');
+            
+            // Initialize peer connection
+            initializePeerConnection();
+            
+            // Send viewer event immediately
+            console.log('Sending viewer event to server');
+            socket.emit('viewer');
+        });
+
+        socket.on('offer', async (offer) => {
+            console.log('Received offer from broadcaster');
+            if (peerConnection) {
+                try {
+                    console.log('Setting remote description...');
+                    await peerConnection.setRemoteDescription(offer);
+                    console.log('Creating answer...');
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    console.log('Answer created, sending to broadcaster');
+                    socket.emit('answer', answer);
+                } catch (error) {
+                    console.error('Error handling offer:', error);
+                    updateStatus('Bağlantı hatası: ' + error.message, 'disconnected');
+                }
+            } else {
+                console.error('PeerConnection not initialized when offer received');
+                updateStatus('PeerConnection hazır değil', 'disconnected');
+            }
+        });
+
+        socket.on('ice-candidate', async (candidate) => {
+            console.log('Received ICE candidate');
+            if (peerConnection) {
+                try {
+                    await peerConnection.addIceCandidate(candidate);
+                } catch (error) {
+                    console.error('Error adding ICE candidate:', error);
+                }
+            }
+        });
+
+        socket.on('user-disconnected', () => {
+            updateStatus('Yayıncı bağlantısı kesildi', 'disconnected');
+            isConnected = false;
+            fullscreenBtn.disabled = true;
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            remoteVideo.srcObject = null;
+        });
+
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (peerConnection) {
+                peerConnection.close();
+            }
+        });
+
+        // Auto-reconnect if connection is lost
+        socket.on('disconnect', () => {
+            updateStatus('Sunucu bağlantısı kesildi, yeniden bağlanılıyor...', 'waiting');
+        });
+
+        socket.on('reconnect', () => {
+            updateStatus('Sunucuya yeniden bağlandı, yayıncı bekleniyor...', 'waiting');
+        });
+    </script>
+</body>
+</html>
