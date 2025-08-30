@@ -413,9 +413,38 @@
         let peerConnection = null;
         let isBroadcasting = false;
 
-        // Mobile detection
+        // Mobile detection and Samsung-specific optimizations
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const isSamsung = /Samsung|SM-/.test(navigator.userAgent);
+
+        // Samsung-specific optimizations
+        function applySamsungOptimizations() {
+            if (isSamsung) {
+                console.log('Samsung device detected, applying broadcaster optimizations');
+                
+                // Samsung-specific video constraints
+                if (localVideo) {
+                    localVideo.style.transform = 'translateZ(0)';
+                    localVideo.style.webkitTransform = 'translateZ(0)';
+                    localVideo.style.willChange = 'transform';
+                    localVideo.style.backfaceVisibility = 'hidden';
+                }
+                
+                // Samsung Internet specific fixes
+                if (navigator.userAgent.includes('SamsungBrowser')) {
+                    console.log('Samsung Internet detected in broadcaster');
+                    
+                    // Force video element to be visible
+                    if (localVideo) {
+                        localVideo.style.display = 'block';
+                        localVideo.style.visibility = 'visible';
+                        localVideo.setAttribute('webkit-playsinline', 'true');
+                        localVideo.setAttribute('playsinline', 'true');
+                    }
+                }
+            }
+        }
 
         // Browser detection and compatibility check
         function detectBrowser() {
@@ -465,11 +494,31 @@
             iceCandidatePoolSize: 10
         };
 
-        // Get video constraints based on selected quality and device capabilities
+        // Get video constraints based on selected quality and device capabilities with Samsung optimization
         function getVideoConstraints() {
             const resolution = resolutionSelect.value;
             const fps = parseInt(fpsSelect.value);
             const [width, height] = resolution.split('x').map(Number);
+            
+            // Samsung-specific constraints
+            if (isSamsung) {
+                console.log('Using Samsung-optimized video constraints');
+                return {
+                    video: {
+                        width: { ideal: Math.min(width, 1280), max: Math.min(width, 1920) },
+                        height: { ideal: Math.min(height, 720), max: Math.min(height, 1080) },
+                        frameRate: { ideal: Math.min(fps, 30), max: Math.min(fps, 60) },
+                        cursor: 'always',
+                        displaySurface: ['monitor', 'window', 'tab'],
+                        logicalSurface: true,
+                        // Samsung-specific codec preferences
+                        codec: 'h264',
+                        profile: 'baseline',
+                        level: '3.1'
+                    },
+                    audio: audioEnabledSelect.value === 'true'
+                };
+            }
             
             // Mobile-specific constraints
             if (isMobile) {
@@ -479,7 +528,7 @@
                         height: { ideal: Math.min(height, 720), max: height },
                         frameRate: { ideal: Math.min(fps, 30), max: fps },
                         cursor: 'always',
-                        displaySurface: 'monitor',
+                        displaySurface: ['monitor', 'window', 'tab'],
                         logicalSurface: true
                     },
                     audio: audioEnabledSelect.value === 'true'
@@ -492,7 +541,7 @@
                     height: { ideal: height, max: height },
                     frameRate: { ideal: fps, max: fps },
                     cursor: 'always',
-                    displaySurface: 'monitor',
+                    displaySurface: ['monitor', 'window', 'tab'],
                     logicalSurface: true
                 },
                 audio: audioEnabledSelect.value === 'true'
@@ -579,13 +628,16 @@
             try {
                 updateStatus('Ekran seçiliyor...', 'waiting');
                 
+                // Apply Samsung optimizations before starting
+                applySamsungOptimizations();
+                
                 const constraints = getVideoConstraints();
                 console.log('Using constraints:', constraints);
                 
-                // Try to get display media with fallback options
+                // Try to get display media with fallback options and Samsung optimization
                 let stream;
                 try {
-                    // Enhanced constraints for better tab/window selection
+                    // Enhanced constraints for better tab/window selection with Samsung support
                     const enhancedConstraints = {
                         video: {
                             ...constraints.video,
@@ -599,20 +651,44 @@
                         systemAudio: audioEnabledSelect.value === 'true' ? 'include' : 'exclude'
                     };
                     
+                    // Samsung-specific constraint modifications
+                    if (isSamsung) {
+                        console.log('Applying Samsung-specific display media constraints');
+                        enhancedConstraints.video = {
+                            ...enhancedConstraints.video,
+                            // Samsung Internet specific settings
+                            width: { ideal: 1280, max: 1920 },
+                            height: { ideal: 720, max: 1080 },
+                            frameRate: { ideal: 30, max: 60 }
+                        };
+                    }
+                    
                     console.log('Trying enhanced constraints:', enhancedConstraints);
                     stream = await navigator.mediaDevices.getDisplayMedia(enhancedConstraints);
                     
                 } catch (error) {
                     console.log('Enhanced constraints failed, trying basic constraints:', error);
                     try {
-                        // Fallback to basic constraints
-                        stream = await navigator.mediaDevices.getDisplayMedia({
+                        // Fallback to basic constraints with Samsung optimization
+                        const basicConstraints = {
                             video: { 
                                 cursor: 'always',
                                 displaySurface: 'monitor'
                             },
                             audio: audioEnabledSelect.value === 'true'
-                        });
+                        };
+                        
+                        // Samsung-specific fallback
+                        if (isSamsung) {
+                            basicConstraints.video = {
+                                ...basicConstraints.video,
+                                width: { ideal: 1280, max: 1920 },
+                                height: { ideal: 720, max: 1080 },
+                                frameRate: { ideal: 30, max: 60 }
+                            };
+                        }
+                        
+                        stream = await navigator.mediaDevices.getDisplayMedia(basicConstraints);
                     } catch (fallbackError) {
                         console.log('Basic constraints also failed:', fallbackError);
                         throw fallbackError;
@@ -621,6 +697,15 @@
 
                 localStream = stream;
                 localVideo.srcObject = localStream;
+                
+                // Apply Samsung optimizations to video element
+                if (isSamsung) {
+                    console.log('Applying Samsung optimizations to local video');
+                    localVideo.style.transform = 'translateZ(0)';
+                    localVideo.style.webkitTransform = 'translateZ(0)';
+                    localVideo.style.willChange = 'transform';
+                    localVideo.style.backfaceVisibility = 'hidden';
+                }
                 
                 // Log stream details
                 const videoTrack = localStream.getVideoTracks()[0];
@@ -635,6 +720,9 @@
                     let statusMessage = `Ekran paylaşımı başladı (${settings.width}x${settings.height} @ ${settings.frameRate}fps)`;
                     if (audioTrack) {
                         statusMessage += ' 🔊 Ses dahil';
+                    }
+                    if (isSamsung) {
+                        statusMessage += ' 📱 Samsung optimizasyonu aktif';
                     }
                     statusMessage += '. İzleyici bekleniyor...';
                     updateStatus(statusMessage, 'waiting');

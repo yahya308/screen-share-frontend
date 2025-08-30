@@ -6,7 +6,7 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
-// Enhanced Socket.IO configuration for Vercel compatibility
+// Enhanced Socket.IO configuration for Vercel compatibility and mobile optimization
 const io = socketIo(server, {
   cors: {
     origin: '*',
@@ -20,7 +20,17 @@ const io = socketIo(server, {
   allowUpgrades: true,
   maxHttpBufferSize: 1e8, // 100MB buffer for large SDP messages
   allowEIO3: true,
-  path: '/socket.io/'
+  path: '/socket.io/',
+  // Mobile-specific optimizations
+  perMessageDeflate: {
+    threshold: 32768, // Only compress messages larger than 32KB
+    zlibInflateOptions: {
+      chunkSize: 10 * 1024 // 10KB chunks for mobile
+    }
+  },
+  // Better mobile connection handling
+  connectTimeout: 45000,
+  maxPayload: 1e8
 });
 
 // Serve static files from public directory
@@ -54,16 +64,32 @@ const activeConnections = new Map();
 let broadcasterCount = 0;
 let viewerCount = 0;
 
-// Socket.IO connection handling with enhanced error management
+// Socket.IO connection handling with enhanced error management and mobile optimization
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id} (Total: ${io.engine.clientsCount})`);
 
-  // Store connection info
+  // Detect mobile devices and apply optimizations
+  const userAgent = socket.handshake.headers['user-agent'] || '';
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  const isSamsung = /Samsung|SM-/.test(userAgent);
+  
+  if (isMobile) {
+    console.log(`Mobile device connected: ${socket.id}`);
+    if (isSamsung) {
+      console.log(`Samsung device connected: ${socket.id}`);
+      // Apply Samsung-specific connection optimizations
+      socket.conn.transport.writable = true;
+    }
+  }
+
+  // Store connection info with mobile detection
   activeConnections.set(socket.id, {
     id: socket.id,
     type: null,
     connectedAt: new Date(),
     lastActivity: new Date(),
+    isMobile: isMobile,
+    isSamsung: isSamsung
   });
 
   // Handle broadcaster joining
@@ -126,7 +152,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle WebRTC offer with validation
+  // Handle WebRTC offer with validation and mobile optimization
   socket.on('offer', (offer) => {
     try {
       if (!offer || !offer.sdp) {
@@ -136,6 +162,43 @@ io.on('connection', (socket) => {
       }
 
       console.log(`Offer received from ${socket.id}, SDP length: ${offer.sdp.length}`);
+
+      // Mobile-specific SDP optimization
+      const connection = activeConnections.get(socket.id);
+      if (connection && connection.isMobile) {
+        console.log(`Mobile device offer detected, applying optimizations`);
+        
+        // Optimize SDP for mobile devices
+        let optimizedSdp = offer.sdp;
+        
+        // Force H.264 baseline profile for mobile compatibility
+        optimizedSdp = optimizedSdp.replace(
+          /a=rtpmap:\d+ H264\/\d+/g,
+          (match) => {
+            return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
+          }
+        );
+        
+        // Samsung-specific optimizations
+        if (connection.isSamsung) {
+          console.log(`Samsung device offer, applying specific optimizations`);
+          
+          // Lower bitrate for Samsung devices
+          optimizedSdp = optimizedSdp.replace(
+            /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
+            '$&;max-fr=30;max-fs=3600'
+          );
+          
+          // Force specific codec settings
+          optimizedSdp = optimizedSdp.replace(
+            /m=video \d+ RTP\/SAVPF/g,
+            'm=video $1 RTP/SAVPF'
+          );
+        }
+        
+        offer.sdp = optimizedSdp;
+        console.log('SDP optimized for mobile device');
+      }
 
       // Validate SDP format
       if (offer.sdp.includes('v=0') && offer.sdp.includes('m=video')) {
@@ -157,7 +220,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle WebRTC answer with validation
+  // Handle WebRTC answer with validation and mobile optimization
   socket.on('answer', (answer) => {
     try {
       if (!answer || !answer.sdp) {
@@ -167,6 +230,37 @@ io.on('connection', (socket) => {
       }
 
       console.log(`Answer received from ${socket.id}, SDP length: ${answer.sdp.length}`);
+
+      // Mobile-specific SDP optimization
+      const connection = activeConnections.get(socket.id);
+      if (connection && connection.isMobile) {
+        console.log(`Mobile device answer detected, applying optimizations`);
+        
+        // Optimize SDP for mobile devices
+        let optimizedSdp = answer.sdp;
+        
+        // Ensure mobile-compatible codec settings
+        optimizedSdp = optimizedSdp.replace(
+          /a=rtpmap:\d+ H264\/\d+/g,
+          (match) => {
+            return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
+          }
+        );
+        
+        // Samsung-specific optimizations
+        if (connection.isSamsung) {
+          console.log(`Samsung device answer, applying specific optimizations`);
+          
+          // Lower bitrate for Samsung devices
+          optimizedSdp = optimizedSdp.replace(
+            /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
+            '$&;max-fr=30;max-fs=3600'
+          );
+        }
+        
+        answer.sdp = optimizedSdp;
+        console.log('Answer SDP optimized for mobile device');
+      }
 
       // Validate SDP format
       if (answer.sdp.includes('v=0') && answer.sdp.includes('m=video')) {

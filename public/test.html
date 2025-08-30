@@ -2,311 +2,665 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Sayfası - Ekran Paylaşım</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Mobil Test Sayfası - Samsung Optimizasyonu</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            padding: 0;
+            background-color: #f5f5f5;
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
+        
         .container {
-            max-width: 800px;
+            max-width: 100%;
             margin: 0 auto;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 30px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-        }
-        .test-section {
-            background: rgba(255, 255, 255, 0.1);
+            background: white;
+            min-height: 100vh;
             padding: 20px;
-            margin: 20px 0;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
         }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin: 0 0 20px 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+        
+        .test-section {
+            background: linear-gradient(135deg, #e7f3ff, #d1ecf1);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+        }
+        
+        .test-section h3 {
+            margin: 0 0 15px 0;
+            color: #004085;
+        }
+        
         .test-button {
-            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            background: linear-gradient(135deg, #28a745, #218838);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 25px;
+            padding: 15px 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 10px;
             cursor: pointer;
-            font-size: 16px;
-            margin: 10px;
+            margin: 10px 5px;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 3px 10px rgba(40,167,69,0.3);
+            min-width: 150px;
+            touch-action: manipulation;
         }
+        
         .test-button:hover {
+            background: linear-gradient(135deg, #218838, #1e7e34);
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
-        .status {
-            background: rgba(0, 0, 0, 0.2);
+        
+        .test-button:disabled {
+            background: linear-gradient(135deg, #6c757d, #5a6268);
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .result {
+            background: #f8f9fa;
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
+            border-left: 3px solid #6c757d;
             font-family: monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
         }
-        .nav-links {
-            text-align: center;
-            margin: 30px 0;
+        
+        .success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
         }
-        .nav-links a {
-            color: white;
-            text-decoration: none;
-            margin: 0 15px;
-            padding: 10px 20px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 25px;
-            transition: all 0.3s ease;
+        
+        .error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+            color: #721c24;
         }
-        .nav-links a:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
+        
+        .warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+            color: #856404;
         }
-        .feature-list {
-            list-style: none;
-            padding: 0;
+        
+        .device-info {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #ffc107;
         }
-        .feature-list li {
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        
+        .samsung-optimization {
+            background: linear-gradient(135deg, #e8f5e8, #d4edda);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 4px solid #28a745;
         }
-        .feature-list li:before {
-            content: "✅ ";
-            margin-right: 10px;
+        
+        .video-test {
+            background: #000;
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            margin: 20px auto;
+            display: block;
+            border-radius: 10px;
+            border: 3px solid #ddd;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            .test-button {
+                width: 100%;
+                margin: 5px 0;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🧪 Test Sayfası</h1>
+        <h1>🧪 Mobil Test Sayfası</h1>
         
-        <div class="nav-links">
-            <a href="/">📺 Yayıncı</a>
-            <a href="/watch">👁️ İzleyici</a>
-            <a href="/test">🧪 Test</a>
+        <div class="device-info">
+            <h3>📱 Cihaz Bilgileri</h3>
+            <div id="deviceInfo">Yükleniyor...</div>
         </div>
-
+        
+        <div class="samsung-optimization">
+            <h3>📱 Samsung Optimizasyonları</h3>
+            <div id="samsungInfo">Kontrol ediliyor...</div>
+        </div>
+        
         <div class="test-section">
-            <h3>🔧 Sistem Testleri</h3>
-            <button class="test-button" onclick="testWebRTC()">WebRTC Test</button>
-            <button class="test-button" onclick="testSocketIO()">Socket.IO Test</button>
-            <button class="test-button" onclick="testMediaDevices()">Media Devices Test</button>
-            <button class="test-button" onclick="testBrowser()">Tarayıcı Test</button>
+            <h3>🎥 Video Test</h3>
+            <p>Video element'inin mobil cihazlarda düzgün çalışıp çalışmadığını test edin.</p>
+            <button class="test-button" onclick="testVideoElement()">Video Element Testi</button>
+            <button class="test-button" onclick="testWebRTC()">WebRTC Testi</button>
+            <button class="test-button" onclick="testTouchEvents()">Touch Event Testi</button>
+            <button class="test-button" onclick="testCodecSupport()">Codec Desteği Testi</button>
+            
+            <video id="testVideo" class="video-test" autoplay muted playsinline></video>
+            
+            <div id="videoResults" class="result" style="display: none;"></div>
         </div>
-
+        
+        <div class="test-section">
+            <h3>🔧 Performans Testleri</h3>
+            <p>Mobil cihaz performansını ve optimizasyonları test edin.</p>
+            <button class="test-button" onclick="testHardwareAcceleration()">Hardware Acceleration</button>
+            <button class="test-button" onclick="testMemoryUsage()">Memory Usage</button>
+            <button class="test-button" onclick="testNetworkLatency()">Network Latency</button>
+            
+            <div id="performanceResults" class="result" style="display: none;"></div>
+        </div>
+        
         <div class="test-section">
             <h3>📊 Test Sonuçları</h3>
-            <div id="testResults" class="status">
-                Testleri başlatmak için yukarıdaki butonlara tıklayın...
-            </div>
-        </div>
-
-        <div class="test-section">
-            <h3>✨ Özellikler</h3>
-            <ul class="feature-list">
-                <li>1080p 60fps ekran paylaşımı</li>
-                <li>Çoklu tarayıcı desteği</li>
-                <li>Mobil uyumlu tasarım</li>
-                <li>Otomatik yeniden bağlanma</li>
-                <li>Gelişmiş hata yönetimi</li>
-                <li>STUN/TURN server desteği</li>
-                <li>Gerçek zamanlı kalite bilgisi</li>
-                <li>Touch gesture desteği</li>
-            </ul>
-        </div>
-
-        <div class="test-section">
-            <h3>🌐 Bağlantı Durumu</h3>
-            <div id="connectionStatus" class="status">
-                Bağlantı kontrol ediliyor...
-            </div>
+            <div id="allResults" class="result"></div>
         </div>
     </div>
 
     <script>
-        // Test sonuçlarını gösterme fonksiyonu
-        function showResult(message, type = 'info') {
-            const resultsDiv = document.getElementById('testResults');
-            const timestamp = new Date().toLocaleTimeString();
-            const result = `[${timestamp}] ${message}\n`;
+        let testResults = [];
+        
+        // Device detection
+        function detectDevice() {
+            const userAgent = navigator.userAgent;
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+            const isSamsung = /Samsung|SM-/.test(userAgent);
+            const isIOS = /iPad|iPhone|iPod/.test(userAgent);
             
-            if (type === 'error') {
-                resultsDiv.innerHTML += `<span style="color: #ff6b6b;">❌ ${result}</span>`;
-            } else if (type === 'success') {
-                resultsDiv.innerHTML += `<span style="color: #51cf66;">✅ ${result}</span>`;
+            let browser = 'Unknown';
+            if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) browser = 'Chrome';
+            else if (userAgent.includes('Firefox')) browser = 'Firefox';
+            else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser = 'Safari';
+            else if (userAgent.includes('Edg')) browser = 'Edge';
+            else if (userAgent.includes('SamsungBrowser')) browser = 'Samsung Internet';
+            
+            const deviceInfo = {
+                isMobile,
+                isSamsung,
+                isIOS,
+                browser,
+                userAgent: userAgent.substring(0, 100) + '...',
+                screenResolution: `${screen.width}x${screen.height}`,
+                viewport: `${window.innerWidth}x${window.innerHeight}`,
+                pixelRatio: window.devicePixelRatio,
+                orientation: window.orientation || 'unknown'
+            };
+            
+            document.getElementById('deviceInfo').innerHTML = `
+                <strong>Mobil:</strong> ${isMobile ? '✅ Evet' : '❌ Hayır'}<br>
+                <strong>Samsung:</strong> ${isSamsung ? '✅ Evet' : '❌ Hayır'}<br>
+                <strong>iOS:</strong> ${isIOS ? '✅ Evet' : '❌ Hayır'}<br>
+                <strong>Tarayıcı:</strong> ${browser}<br>
+                <strong>Ekran:</strong> ${deviceInfo.screenResolution}<br>
+                <strong>Viewport:</strong> ${deviceInfo.viewport}<br>
+                <strong>Pixel Ratio:</strong> ${deviceInfo.pixelRatio}<br>
+                <strong>Oryantasyon:</strong> ${deviceInfo.orientation}
+            `;
+            
+            return deviceInfo;
+        }
+        
+        // Samsung optimizations check
+        function checkSamsungOptimizations() {
+            const deviceInfo = detectDevice();
+            let optimizations = [];
+            
+            if (deviceInfo.isSamsung) {
+                optimizations.push('✅ Samsung cihaz tespit edildi');
+                optimizations.push('✅ Samsung Internet optimizasyonları aktif');
+                
+                // Check for Samsung-specific features
+                if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                    optimizations.push('✅ Ekran paylaşımı destekleniyor');
+                } else {
+                    optimizations.push('❌ Ekran paylaşımı desteklenmiyor');
+                }
+                
+                // Check for hardware acceleration
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        optimizations.push(`✅ Hardware acceleration: ${renderer}`);
+                    }
+                }
+                
             } else {
-                resultsDiv.innerHTML += `<span style="color: #74c0fc;">ℹ️ ${result}</span>`;
+                optimizations.push('❌ Samsung cihaz değil');
             }
             
-            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+            document.getElementById('samsungInfo').innerHTML = optimizations.join('<br>');
         }
-
-        // WebRTC test
-        function testWebRTC() {
-            showResult('WebRTC testi başlatılıyor...');
+        
+        // Test video element
+        async function testVideoElement() {
+            const results = [];
+            results.push('=== Video Element Testi ===');
             
             try {
-                if (typeof RTCPeerConnection !== 'undefined') {
-                    const pc = new RTCPeerConnection();
-                    showResult('RTCPeerConnection oluşturuldu', 'success');
-                    
-                    if (typeof RTCSessionDescription !== 'undefined') {
-                        showResult('RTCSessionDescription mevcut', 'success');
-                    } else {
-                        showResult('RTCSessionDescription bulunamadı', 'error');
+                const video = document.getElementById('testVideo');
+                
+                // Test video attributes
+                video.setAttribute('webkit-playsinline', 'true');
+                video.setAttribute('playsinline', 'true');
+                video.setAttribute('muted', 'true');
+                video.muted = true;
+                video.autoplay = true;
+                
+                results.push('✅ Video attributes set');
+                
+                // Test hardware acceleration
+                video.style.transform = 'translateZ(0)';
+                video.style.webkitTransform = 'translateZ(0)';
+                video.style.willChange = 'transform';
+                video.style.backfaceVisibility = 'hidden';
+                
+                results.push('✅ Hardware acceleration styles applied');
+                
+                // Test video capabilities
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        video.srcObject = stream;
+                        results.push('✅ Camera stream connected');
+                        
+                        // Test play
+                        try {
+                            await video.play();
+                            results.push('✅ Video play successful');
+                        } catch (playError) {
+                            results.push(`⚠️ Video play failed: ${playError.message}`);
+                        }
+                        
+                        // Stop stream after test
+                        stream.getTracks().forEach(track => track.stop());
+                        
+                    } catch (cameraError) {
+                        results.push(`❌ Camera access failed: ${cameraError.message}`);
                     }
+                } else {
+                    results.push('❌ getUserMedia not supported');
+                }
+                
+            } catch (error) {
+                results.push(`❌ Video test error: ${error.message}`);
+            }
+            
+            showResults('videoResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
+        }
+        
+        // Test WebRTC
+        async function testWebRTC() {
+            const results = [];
+            results.push('=== WebRTC Testi ===');
+            
+            try {
+                // Test RTCPeerConnection
+                if (window.RTCPeerConnection) {
+                    results.push('✅ RTCPeerConnection supported');
                     
-                    if (typeof RTCIceCandidate !== 'undefined') {
-                        showResult('RTCIceCandidate mevcut', 'success');
-                    } else {
-                        showResult('RTCIceCandidate bulunamadı', 'error');
+                    const pc = new RTCPeerConnection({
+                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    });
+                    
+                    results.push('✅ RTCPeerConnection created');
+                    
+                    // Test offer creation
+                    try {
+                        const offer = await pc.createOffer();
+                        results.push('✅ Offer created successfully');
+                        results.push(`   SDP length: ${offer.sdp.length}`);
+                        
+                        // Check for H.264 support
+                        if (offer.sdp.includes('H264')) {
+                            results.push('✅ H.264 codec supported');
+                        } else {
+                            results.push('❌ H.264 codec not found');
+                        }
+                        
+                    } catch (offerError) {
+                        results.push(`❌ Offer creation failed: ${offerError.message}`);
                     }
                     
                     pc.close();
-                    showResult('WebRTC testi tamamlandı', 'success');
+                    results.push('✅ RTCPeerConnection closed');
+                    
                 } else {
-                    showResult('WebRTC desteklenmiyor', 'error');
+                    results.push('❌ RTCPeerConnection not supported');
                 }
-            } catch (error) {
-                showResult(`WebRTC test hatası: ${error.message}`, 'error');
-            }
-        }
-
-        // Socket.IO test
-        function testSocketIO() {
-            showResult('Socket.IO testi başlatılıyor...');
-            
-            try {
-                if (typeof io !== 'undefined') {
-                    showResult('Socket.IO kütüphanesi mevcut', 'success');
-                    
-                    // Socket.IO bağlantı testi
-                    const socket = io();
-                    
-                    socket.on('connect', () => {
-                        showResult('Socket.IO bağlantısı başarılı', 'success');
-                        socket.disconnect();
-                    });
-                    
-                    socket.on('connect_error', (error) => {
-                        showResult(`Socket.IO bağlantı hatası: ${error.message}`, 'error');
-                    });
-                    
-                    setTimeout(() => {
-                        if (socket.connected) {
-                            showResult('Socket.IO testi tamamlandı', 'success');
-                        } else {
-                            showResult('Socket.IO bağlantı zaman aşımı', 'error');
-                        }
-                    }, 3000);
-                } else {
-                    showResult('Socket.IO kütüphanesi bulunamadı', 'error');
-                }
-            } catch (error) {
-                showResult(`Socket.IO test hatası: ${error.message}`, 'error');
-            }
-        }
-
-        // Media Devices test
-        async function testMediaDevices() {
-            showResult('Media Devices testi başlatılıyor...');
-            
-            try {
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    showResult('getUserMedia API mevcut', 'success');
+                
+                // Test media devices
+                if (navigator.mediaDevices) {
+                    results.push('✅ MediaDevices API supported');
                     
                     if (navigator.mediaDevices.getDisplayMedia) {
-                        showResult('getDisplayMedia API mevcut', 'success');
+                        results.push('✅ getDisplayMedia supported');
                     } else {
-                        showResult('getDisplayMedia API bulunamadı', 'error');
+                        results.push('❌ getDisplayMedia not supported');
                     }
                     
-                    // Kamera testi
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                        showResult('Kamera erişimi başarılı', 'success');
-                        stream.getTracks().forEach(track => track.stop());
-                    } catch (error) {
-                        showResult(`Kamera erişimi hatası: ${error.message}`, 'error');
-                    }
-                    
-                    showResult('Media Devices testi tamamlandı', 'success');
                 } else {
-                    showResult('Media Devices API desteklenmiyor', 'error');
+                    results.push('❌ MediaDevices API not supported');
                 }
+                
             } catch (error) {
-                showResult(`Media Devices test hatası: ${error.message}`, 'error');
+                results.push(`❌ WebRTC test error: ${error.message}`);
             }
+            
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
         }
-
-        // Tarayıcı test
-        function testBrowser() {
-            showResult('Tarayıcı testi başlatılıyor...');
+        
+        // Test touch events
+        function testTouchEvents() {
+            const results = [];
+            results.push('=== Touch Event Testi ===');
             
-            const userAgent = navigator.userAgent;
-            showResult(`User Agent: ${userAgent}`, 'info');
-            
-            // Tarayıcı tespiti
-            if (userAgent.includes('Chrome')) {
-                showResult('Chrome tarayıcısı tespit edildi', 'success');
-            } else if (userAgent.includes('Firefox')) {
-                showResult('Firefox tarayıcısı tespit edildi', 'success');
-            } else if (userAgent.includes('Safari')) {
-                showResult('Safari tarayıcısı tespit edildi', 'success');
-            } else if (userAgent.includes('Edge')) {
-                showResult('Edge tarayıcısı tespit edildi', 'success');
-            } else {
-                showResult('Bilinmeyen tarayıcı', 'error');
+            try {
+                const video = document.getElementById('testVideo');
+                
+                // Test touch event support
+                if ('ontouchstart' in window) {
+                    results.push('✅ Touch events supported');
+                    
+                    // Test Samsung-specific touch handling
+                    const isSamsung = /Samsung|SM-/.test(navigator.userAgent);
+                    if (isSamsung) {
+                        results.push('✅ Samsung device detected');
+                        
+                        // Apply Samsung touch optimizations
+                        video.style.touchAction = 'manipulation';
+                        video.style.webkitTouchCallout = 'none';
+                        video.style.webkitUserSelect = 'none';
+                        video.style.userSelect = 'none';
+                        
+                        results.push('✅ Samsung touch optimizations applied');
+                    }
+                    
+                } else {
+                    results.push('❌ Touch events not supported');
+                }
+                
+                // Test gesture events (Samsung specific)
+                if ('ongesturestart' in window) {
+                    results.push('✅ Gesture events supported (Samsung)');
+                } else {
+                    results.push('⚠️ Gesture events not supported');
+                }
+                
+            } catch (error) {
+                results.push(`❌ Touch test error: ${error.message}`);
             }
             
-            // Mobil tespiti
-            if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)) {
-                showResult('Mobil cihaz tespit edildi', 'success');
-            } else {
-                showResult('Masaüstü cihaz tespit edildi', 'success');
-            }
-            
-            // Ekran bilgisi
-            showResult(`Ekran çözünürlüğü: ${screen.width}x${screen.height}`, 'info');
-            showResult(`Viewport: ${window.innerWidth}x${window.innerHeight}`, 'info');
-            
-            showResult('Tarayıcı testi tamamlandı', 'success');
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
         }
-
-        // Bağlantı durumu kontrolü
-        function checkConnection() {
-            const statusDiv = document.getElementById('connectionStatus');
+        
+        // Test codec support
+        function testCodecSupport() {
+            const results = [];
+            results.push('=== Codec Desteği Testi ===');
             
-            if (navigator.onLine) {
-                statusDiv.innerHTML = '🌐 Çevrimiçi - İnternet bağlantısı mevcut';
-                statusDiv.style.color = '#51cf66';
-            } else {
-                statusDiv.innerHTML = '❌ Çevrimdışı - İnternet bağlantısı yok';
-                statusDiv.style.color = '#ff6b6b';
+            try {
+                const video = document.getElementById('testVideo');
+                
+                // Test video codec support
+                if (video.canPlayType) {
+                    const h264 = video.canPlayType('video/mp4; codecs="avc1.42E01E"');
+                    const h265 = video.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"');
+                    const vp9 = video.canPlayType('video/webm; codecs="vp9"');
+                    
+                    results.push(`H.264: ${h264 || '❌'}`);
+                    results.push(`H.265: ${h265 || '❌'}`);
+                    results.push(`VP9: ${vp9 || '❌'}`);
+                    
+                    if (h264) {
+                        results.push('✅ H.264 codec supported (recommended for mobile)');
+                    } else {
+                        results.push('❌ H.264 codec not supported (may cause issues)');
+                    }
+                } else {
+                    results.push('❌ canPlayType not supported');
+                }
+                
+                // Test audio codec support
+                if (video.canPlayType) {
+                    const aac = video.canPlayType('audio/mp4; codecs="mp4a.40.2"');
+                    const opus = video.canPlayType('audio/webm; codecs="opus"');
+                    
+                    results.push(`AAC: ${aac || '❌'}`);
+                    results.push(`Opus: ${opus || '❌'}`);
+                }
+                
+            } catch (error) {
+                results.push(`❌ Codec test error: ${error.message}`);
             }
-        }
-
-        // Sayfa yüklendiğinde
-        window.addEventListener('load', () => {
-            showResult('Test sayfası yüklendi', 'success');
-            checkConnection();
             
-            // Bağlantı durumu değişikliklerini dinle
-            window.addEventListener('online', checkConnection);
-            window.addEventListener('offline', checkConnection);
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
+        }
+        
+        // Test hardware acceleration
+        function testHardwareAcceleration() {
+            const results = [];
+            results.push('=== Hardware Acceleration Testi ===');
+            
+            try {
+                // Test WebGL
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                
+                if (gl) {
+                    results.push('✅ WebGL supported');
+                    
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        
+                        results.push(`   Renderer: ${renderer}`);
+                        results.push(`   Vendor: ${vendor}`);
+                        
+                        if (renderer.includes('GPU') || renderer.includes('Graphics')) {
+                            results.push('✅ Dedicated GPU detected');
+                        } else {
+                            results.push('⚠️ Integrated graphics detected');
+                        }
+                    }
+                } else {
+                    results.push('❌ WebGL not supported');
+                }
+                
+                // Test CSS transforms
+                const testDiv = document.createElement('div');
+                testDiv.style.transform = 'translateZ(0)';
+                testDiv.style.webkitTransform = 'translateZ(0)';
+                
+                if (testDiv.style.transform || testDiv.style.webkitTransform) {
+                    results.push('✅ CSS 3D transforms supported');
+                } else {
+                    results.push('❌ CSS 3D transforms not supported');
+                }
+                
+            } catch (error) {
+                results.push(`❌ Hardware acceleration test error: ${error.message}`);
+            }
+            
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
+        }
+        
+        // Test memory usage
+        function testMemoryUsage() {
+            const results = [];
+            results.push('=== Memory Usage Testi ===');
+            
+            try {
+                // Test memory info if available
+                if (performance.memory) {
+                    const memory = performance.memory;
+                    results.push(`Total JS Heap Size: ${Math.round(memory.totalJSHeapSize / 1048576)} MB`);
+                    results.push(`Used JS Heap Size: ${Math.round(memory.usedJSHeapSize / 1048576)} MB`);
+                    results.push(`JS Heap Size Limit: ${Math.round(memory.jsHeapSizeLimit / 1048576)} MB`);
+                    
+                    const usagePercent = (memory.usedJSHeapSize / memory.totalJSHeapSize * 100).toFixed(1);
+                    results.push(`Memory Usage: ${usagePercent}%`);
+                    
+                    if (usagePercent > 80) {
+                        results.push('⚠️ High memory usage detected');
+                    } else {
+                        results.push('✅ Memory usage normal');
+                    }
+                } else {
+                    results.push('⚠️ Memory info not available');
+                }
+                
+                // Test device memory if available
+                if (navigator.deviceMemory) {
+                    results.push(`Device Memory: ${navigator.deviceMemory} GB`);
+                    
+                    if (navigator.deviceMemory < 2) {
+                        results.push('⚠️ Low device memory - may affect performance');
+                    } else {
+                        results.push('✅ Sufficient device memory');
+                    }
+                } else {
+                    results.push('⚠️ Device memory info not available');
+                }
+                
+            } catch (error) {
+                results.push(`❌ Memory test error: ${error.message}`);
+            }
+            
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
+        }
+        
+        // Test network latency
+        function testNetworkLatency() {
+            const results = [];
+            results.push('=== Network Latency Testi ===');
+            
+            try {
+                // Test connection info
+                if (navigator.connection) {
+                    const connection = navigator.connection;
+                    results.push(`Connection Type: ${connection.effectiveType || 'unknown'}`);
+                    results.push(`Downlink: ${connection.downlink || 'unknown'} Mbps`);
+                    results.push(`RTT: ${connection.rtt || 'unknown'} ms`);
+                    
+                    if (connection.effectiveType === '4g' || connection.effectiveType === '5g') {
+                        results.push('✅ Good connection for video streaming');
+                    } else if (connection.effectiveType === '3g') {
+                        results.push('⚠️ Moderate connection - may affect quality');
+                    } else {
+                        results.push('❌ Poor connection - may cause issues');
+                    }
+                } else {
+                    results.push('⚠️ Connection info not available');
+                }
+                
+                // Test ping to server
+                const startTime = performance.now();
+                fetch('/health')
+                    .then(response => response.json())
+                    .then(data => {
+                        const endTime = performance.now();
+                        const latency = Math.round(endTime - startTime);
+                        results.push(`Server Latency: ${latency} ms`);
+                        
+                        if (latency < 100) {
+                            results.push('✅ Excellent latency');
+                        } else if (latency < 300) {
+                            results.push('✅ Good latency');
+                        } else {
+                            results.push('⚠️ High latency - may affect performance');
+                        }
+                        
+                        showResults('performanceResults', results.join('\n'), 'success');
+                        addToAllResults(results.join('\n'));
+                    })
+                    .catch(error => {
+                        results.push(`❌ Latency test failed: ${error.message}`);
+                        showResults('performanceResults', results.join('\n'), 'error');
+                        addToAllResults(results.join('\n'));
+                    });
+                
+                return; // Don't show results yet, wait for fetch
+                
+            } catch (error) {
+                results.push(`❌ Network test error: ${error.message}`);
+            }
+            
+            showResults('performanceResults', results.join('\n'), 'success');
+            addToAllResults(results.join('\n'));
+        }
+        
+        // Helper functions
+        function showResults(elementId, content, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = content;
+            element.style.display = 'block';
+            element.className = `result ${type}`;
+        }
+        
+        function addToAllResults(content) {
+            testResults.push(content);
+            document.getElementById('allResults').textContent = testResults.join('\n\n');
+        }
+        
+        // Initialize tests
+        document.addEventListener('DOMContentLoaded', () => {
+            detectDevice();
+            checkSamsungOptimizations();
+            
+            // Add orientation change handler
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    detectDevice();
+                }, 100);
+            });
         });
     </script>
 </body>

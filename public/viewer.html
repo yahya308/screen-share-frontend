@@ -494,7 +494,7 @@
             return { browser, isSupported };
         }
 
-        // WebRTC configuration with better STUN/TURN servers
+        // WebRTC configuration with better STUN/TURN servers and mobile optimization
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -503,8 +503,58 @@
                 { urls: 'stun:stun3.l.google.com:19302' },
                 { urls: 'stun:stun4.l.google.com:19302' }
             ],
-            iceCandidatePoolSize: 10
+            iceCandidatePoolSize: 10,
+            // Mobile-specific optimizations
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require',
+            iceTransportPolicy: 'all',
+            sdpSemantics: 'unified-plan'
         };
+
+        // Mobile-specific video constraints
+        function getMobileVideoConstraints() {
+            if (!isMobile) return {};
+            
+            return {
+                video: {
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 },
+                    frameRate: { ideal: 30, max: 60 },
+                    // Mobile-optimized codec preferences
+                    codec: 'h264',
+                    profile: 'baseline',
+                    level: '3.1'
+                }
+            };
+        }
+
+        // Samsung-specific optimizations
+        function applySamsungOptimizations() {
+            const userAgent = navigator.userAgent;
+            const isSamsung = userAgent.includes('Samsung') || userAgent.includes('SM-');
+            
+            if (isSamsung) {
+                console.log('Samsung device detected, applying optimizations');
+                
+                // Samsung-specific video settings
+                remoteVideo.style.transform = 'translateZ(0)'; // Hardware acceleration
+                remoteVideo.style.webkitTransform = 'translateZ(0)';
+                
+                // Samsung Internet specific fixes
+                if (userAgent.includes('SamsungBrowser')) {
+                    console.log('Samsung Internet detected');
+                    // Force video element to be visible
+                    remoteVideo.style.display = 'block';
+                    remoteVideo.style.visibility = 'visible';
+                    
+                    // Samsung-specific autoplay handling
+                    remoteVideo.setAttribute('webkit-playsinline', 'true');
+                    remoteVideo.setAttribute('playsinline', 'true');
+                    remoteVideo.setAttribute('muted', 'true');
+                    remoteVideo.muted = true;
+                }
+            }
+        }
 
         // Update status display
         function updateStatus(message, type) {
@@ -525,23 +575,24 @@
             }
         }
 
-        // Initialize WebRTC connection with better settings
+        // Initialize WebRTC connection with better settings and mobile optimization
         function initializePeerConnection() {
             console.log('Creating RTCPeerConnection...');
             
-            // Enhanced configuration for better quality
+            // Enhanced configuration for better quality and mobile support
             const enhancedConfig = {
                 ...configuration,
-                bundlePolicy: 'max-bundle',
-                rtcpMuxPolicy: 'require',
-                iceTransportPolicy: 'all',
-                sdpSemantics: 'unified-plan'
+                // Mobile-specific constraints
+                ...getMobileVideoConstraints()
             };
             
             peerConnection = new RTCPeerConnection(enhancedConfig);
             console.log('RTCPeerConnection created successfully');
 
-            // Handle incoming tracks with better error handling
+            // Apply Samsung-specific optimizations
+            applySamsungOptimizations();
+
+            // Handle incoming tracks with better error handling and mobile support
             peerConnection.ontrack = (event) => {
                 console.log('Received remote stream');
                 console.log('Stream tracks:', event.streams[0].getTracks());
@@ -549,18 +600,63 @@
                 const stream = event.streams[0];
                 remoteVideo.srcObject = stream;
                 
+                // Mobile-specific video element setup
+                if (isMobile) {
+                    remoteVideo.setAttribute('webkit-playsinline', 'true');
+                    remoteVideo.setAttribute('playsinline', 'true');
+                    remoteVideo.setAttribute('muted', 'true');
+                    remoteVideo.muted = true;
+                    remoteVideo.autoplay = true;
+                    
+                    // Force hardware acceleration on mobile
+                    remoteVideo.style.transform = 'translateZ(0)';
+                    remoteVideo.style.webkitTransform = 'translateZ(0)';
+                }
+                
                 // Enable controls
                 fullscreenBtn.disabled = false;
                 playPauseBtn.disabled = false;
                 muteBtn.disabled = false;
                 
-                // Try to play immediately with better error handling
+                // Try to play immediately with better error handling and mobile support
                 console.log('Stream set to video element, attempting to play...');
                 
                 const playVideo = async () => {
                     try {
-                        await remoteVideo.play();
-                        console.log('Video started playing successfully');
+                        // Mobile-specific play strategy
+                        if (isMobile) {
+                            // Force muted state for mobile autoplay
+                            remoteVideo.muted = true;
+                            remoteVideo.volume = 0;
+                            
+                            // Try multiple play strategies for mobile
+                            try {
+                                await remoteVideo.play();
+                                console.log('Video started playing successfully on mobile');
+                            } catch (mobileError) {
+                                console.log('Mobile play failed, trying alternative method:', mobileError);
+                                
+                                // Alternative method for mobile
+                                remoteVideo.currentTime = 0;
+                                remoteVideo.load();
+                                
+                                // Wait a bit and try again
+                                setTimeout(async () => {
+                                    try {
+                                        await remoteVideo.play();
+                                        console.log('Video started playing with alternative method');
+                                    } catch (retryError) {
+                                        console.log('Alternative method also failed:', retryError);
+                                        throw retryError;
+                                    }
+                                }, 1000);
+                            }
+                        } else {
+                            // Desktop play
+                            await remoteVideo.play();
+                            console.log('Video started playing successfully on desktop');
+                        }
+                        
                         isConnected = true;
                         updateStatus('Yayın bağlandı! 🎉', 'connected');
                         
@@ -570,12 +666,38 @@
                     } catch (error) {
                         console.log('Play failed:', error.message);
                         
-                        // Try different approaches based on error type
+                        // Try different approaches based on error type and device
                         if (error.name === 'NotAllowedError') {
-                            updateStatus('Video oynatma için izin gerekli. Sayfayı yenileyin ve izin verin.', 'disconnected');
+                            if (isMobile) {
+                                updateStatus('📱 Mobil cihazda video oynatma için ekrana dokunun', 'disconnected');
+                                
+                                // Add touch-to-play functionality for mobile
+                                const touchToPlay = async (e) => {
+                                    e.preventDefault();
+                                    try {
+                                        await remoteVideo.play();
+                                        console.log('Video started playing after touch');
+                                        isConnected = true;
+                                        updateStatus('Yayın bağlandı! 🎉', 'connected');
+                                        setTimeout(updateQualityInfo, 1000);
+                                        
+                                        // Remove touch listener after successful play
+                                        remoteVideo.removeEventListener('touchstart', touchToPlay);
+                                        remoteVideo.removeEventListener('click', touchToPlay);
+                                    } catch (e) {
+                                        console.error('Touch-to-play failed:', e);
+                                    }
+                                };
+                                
+                                remoteVideo.addEventListener('touchstart', touchToPlay);
+                                remoteVideo.addEventListener('click', touchToPlay);
+                                
+                            } else {
+                                updateStatus('Video oynatma için izin gerekli. Sayfayı yenileyin ve izin verin.', 'disconnected');
+                            }
                         } else {
                             // Try again after user interaction
-                            document.addEventListener('click', async () => {
+                            const userInteractionPlay = async () => {
                                 try {
                                     await remoteVideo.play();
                                     console.log('Video started playing after user interaction');
@@ -585,7 +707,14 @@
                                 } catch (e) {
                                     console.error('Play failed after user interaction:', e);
                                 }
-                            }, { once: true });
+                                
+                                // Remove listeners after attempt
+                                document.removeEventListener('click', userInteractionPlay);
+                                document.removeEventListener('touchstart', userInteractionPlay);
+                            };
+                            
+                            document.addEventListener('click', userInteractionPlay, { once: true });
+                            document.addEventListener('touchstart', userInteractionPlay, { once: true });
                         }
                     }
                 };
@@ -742,14 +871,70 @@
             videoOverlay.classList.remove('show');
         });
         
-        // Video event listeners for better debugging
+        // Video event listeners for better debugging and mobile support
         remoteVideo.addEventListener('loadedmetadata', () => {
             console.log('Video metadata loaded');
+            console.log('Video dimensions:', remoteVideo.videoWidth, 'x', remoteVideo.videoHeight);
+            console.log('Video ready state:', remoteVideo.readyState);
+            
+            // Mobile-specific metadata handling
+            if (isMobile) {
+                console.log('Mobile device - applying video optimizations');
+                
+                // Force video to be visible and ready
+                remoteVideo.style.display = 'block';
+                remoteVideo.style.visibility = 'visible';
+                
+                // Samsung-specific fixes
+                if (navigator.userAgent.includes('Samsung')) {
+                    console.log('Samsung device - applying specific fixes');
+                    remoteVideo.style.transform = 'translateZ(0)';
+                    remoteVideo.style.webkitTransform = 'translateZ(0)';
+                    
+                    // Force hardware acceleration
+                    remoteVideo.style.willChange = 'transform';
+                    remoteVideo.style.backfaceVisibility = 'hidden';
+                }
+            }
+            
             updateQualityInfo();
         });
         
         remoteVideo.addEventListener('canplay', () => {
             console.log('Video can play');
+            console.log('Video current time:', remoteVideo.currentTime);
+            console.log('Video duration:', remoteVideo.duration);
+            
+            // Mobile-specific canplay handling
+            if (isMobile) {
+                console.log('Mobile device - video can play');
+                
+                // Try to start playing if not already playing
+                if (remoteVideo.paused && !isPaused) {
+                    console.log('Attempting to start video on mobile');
+                    remoteVideo.play().catch(e => {
+                        console.log('Auto-play failed on mobile:', e);
+                        // This is expected on mobile, user needs to interact
+                    });
+                }
+            }
+        });
+        
+        remoteVideo.addEventListener('canplaythrough', () => {
+            console.log('Video can play through');
+            
+            // Mobile-specific buffering optimization
+            if (isMobile) {
+                console.log('Mobile device - video can play through');
+                
+                // Preload more data for mobile
+                remoteVideo.preload = 'auto';
+                
+                // Set lower quality for mobile if needed
+                if (remoteVideo.videoWidth > 1280 || remoteVideo.videoHeight > 720) {
+                    console.log('High resolution detected on mobile, considering quality reduction');
+                }
+            }
         });
         
         remoteVideo.addEventListener('playing', () => {
@@ -757,6 +942,20 @@
             isPaused = false;
             playPauseBtn.textContent = '⏸️ Duraklat';
             overlayPlayPause.textContent = '⏸️ Duraklat';
+            
+            // Mobile-specific playing state handling
+            if (isMobile) {
+                console.log('Mobile device - video is playing');
+                
+                // Remove any loading indicators
+                if (statusDiv.classList.contains('loading')) {
+                    updateStatus('Yayın bağlandı! 🎉', 'connected');
+                }
+                
+                // Optimize for mobile playback
+                remoteVideo.style.transform = 'translateZ(0)';
+                remoteVideo.style.webkitTransform = 'translateZ(0)';
+            }
         });
         
         remoteVideo.addEventListener('pause', () => {
@@ -764,44 +963,157 @@
             isPaused = true;
             playPauseBtn.textContent = '▶️ Oynat';
             overlayPlayPause.textContent = '▶️ Oynat';
+            
+            // Mobile-specific pause handling
+            if (isMobile) {
+                console.log('Mobile device - video is paused');
+                
+                // Check if pause was intentional or due to mobile restrictions
+                if (remoteVideo.readyState >= 2) {
+                    console.log('Video ready but paused - may be mobile autoplay restriction');
+                }
+            }
+        });
+        
+        remoteVideo.addEventListener('waiting', () => {
+            console.log('Video is waiting for data');
+            
+            // Mobile-specific buffering handling
+            if (isMobile) {
+                console.log('Mobile device - video buffering');
+                updateStatus('📱 Video yükleniyor...', 'loading');
+            }
+        });
+        
+        remoteVideo.addEventListener('stalled', () => {
+            console.log('Video playback stalled');
+            
+            // Mobile-specific stall handling
+            if (isMobile) {
+                console.log('Mobile device - video stalled');
+                updateStatus('📱 Video durakladı, yeniden başlatılıyor...', 'waiting');
+                
+                // Try to recover from stall
+                setTimeout(() => {
+                    if (remoteVideo.paused && !isPaused) {
+                        console.log('Attempting to recover from stall');
+                        remoteVideo.play().catch(e => {
+                            console.log('Recovery play failed:', e);
+                        });
+                    }
+                }, 2000);
+            }
         });
         
         remoteVideo.addEventListener('error', (e) => {
             console.error('Video error:', e);
-            updateStatus('Video hatası oluştu', 'disconnected');
+            console.error('Video error details:', remoteVideo.error);
+            
+            // Mobile-specific error handling
+            if (isMobile) {
+                console.log('Mobile device - video error occurred');
+                
+                if (remoteVideo.error && remoteVideo.error.code === 4) {
+                    updateStatus('📱 Video yüklenemedi, yeniden deneniyor...', 'waiting');
+                    
+                    // Try to reload video
+                    setTimeout(() => {
+                        if (remoteVideo.srcObject) {
+                            console.log('Attempting to reload video after error');
+                            remoteVideo.load();
+                        }
+                    }, 3000);
+                } else {
+                    updateStatus('📱 Video hatası oluştu', 'disconnected');
+                }
+            } else {
+                updateStatus('Video hatası oluştu', 'disconnected');
+            }
         });
 
-        // Touch and gesture support for mobile
+        // Touch and gesture support for mobile with Samsung optimizations
         if (isMobile) {
-            // Single tap to show/hide overlay
+            console.log('Mobile device detected, setting up touch controls');
+            
+            // Samsung-specific touch optimizations
+            const isSamsung = navigator.userAgent.includes('Samsung') || navigator.userAgent.includes('SM-');
+            if (isSamsung) {
+                console.log('Samsung device detected, applying touch optimizations');
+                
+                // Samsung-specific touch handling
+                remoteVideo.style.touchAction = 'manipulation';
+                remoteVideo.style.webkitTouchCallout = 'none';
+                remoteVideo.style.webkitUserSelect = 'none';
+                remoteVideo.style.userSelect = 'none';
+            }
+            
+            // Single tap to show/hide overlay with better timing
             let tapTimeout;
+            let lastTapTime = 0;
+            
             remoteVideo.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+                const currentTime = Date.now();
+                
+                // Clear previous timeout
                 clearTimeout(tapTimeout);
+                
+                // Set new timeout for single tap
                 tapTimeout = setTimeout(() => {
-                    toggleVideoOverlay();
+                    // Only show overlay if it's a single tap (not double tap)
+                    if (currentTime - lastTapTime > 300) {
+                        toggleVideoOverlay();
+                    }
                 }, 200);
-            });
+                
+                lastTapTime = currentTime;
+            }, { passive: false });
 
-            // Double tap for fullscreen
+            // Double tap for fullscreen with Samsung optimization
             let lastTap = 0;
             remoteVideo.addEventListener('touchend', (e) => {
                 const currentTime = new Date().getTime();
                 const tapLength = currentTime - lastTap;
+                
                 if (tapLength < 500 && tapLength > 0) {
                     // Double tap detected
                     e.preventDefault();
-                    toggleFullscreen();
+                    console.log('Double tap detected, toggling fullscreen');
+                    
+                    // Samsung-specific fullscreen handling
+                    if (isSamsung) {
+                        console.log('Samsung device - handling fullscreen');
+                        
+                        // Force video to be ready before fullscreen
+                        if (remoteVideo.readyState >= 2) {
+                            toggleFullscreen();
+                        } else {
+                            console.log('Video not ready for fullscreen on Samsung device');
+                            // Wait for video to be ready
+                            const checkReady = () => {
+                                if (remoteVideo.readyState >= 2) {
+                                    toggleFullscreen();
+                                    remoteVideo.removeEventListener('canplay', checkReady);
+                                }
+                            };
+                            remoteVideo.addEventListener('canplay', checkReady);
+                        }
+                    } else {
+                        toggleFullscreen();
+                    }
                 }
                 lastTap = currentTime;
-            });
+            }, { passive: false });
 
-            // Swipe gestures
+            // Enhanced swipe gestures with Samsung support
             let startX = 0;
             let startY = 0;
+            let startTime = 0;
+            
             remoteVideo.addEventListener('touchstart', (e) => {
                 startX = e.touches[0].clientX;
-                startY = e.touches[0].clientY;
+                startY = e.touches[0].clientX;
+                startTime = Date.now();
             });
 
             remoteVideo.addEventListener('touchend', (e) => {
@@ -809,34 +1121,76 @@
                 
                 const endX = e.changedTouches[0].clientX;
                 const endY = e.changedTouches[0].clientY;
+                const endTime = Date.now();
                 const diffX = startX - endX;
                 const diffY = startY - endY;
+                const duration = endTime - startTime;
                 
-                // Swipe left/right for play/pause
-                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
-                    if (diffX > 0) {
-                        // Swipe left - play
-                        if (isPaused) togglePlayPause();
-                    } else {
-                        // Swipe right - pause
-                        if (!isPaused) togglePlayPause();
+                // Only process swipes that are fast enough and long enough
+                if (duration < 500 && (Math.abs(diffX) > 50 || Math.abs(diffY) > 50)) {
+                    console.log('Swipe detected:', { diffX, diffY, duration });
+                    
+                    // Swipe left/right for play/pause
+                    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+                        if (diffX > 0) {
+                            // Swipe left - play
+                            if (isPaused) {
+                                console.log('Swipe left - playing video');
+                                togglePlayPause();
+                            }
+                        } else {
+                            // Swipe right - pause
+                            if (!isPaused) {
+                                console.log('Swipe right - pausing video');
+                                togglePlayPause();
+                            }
+                        }
+                    }
+                    
+                    // Swipe up/down for mute/unmute
+                    if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 50) {
+                        if (diffY > 0) {
+                            // Swipe up - unmute
+                            if (isMuted) {
+                                console.log('Swipe up - unmuting video');
+                                toggleMute();
+                            }
+                        } else {
+                            // Swipe down - mute
+                            if (!isMuted) {
+                                console.log('Swipe down - muting video');
+                                toggleMute();
+                            }
+                        }
                     }
                 }
                 
-                // Swipe up/down for mute/unmute
-                if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 50) {
-                    if (diffY > 0) {
-                        // Swipe up - unmute
-                        if (isMuted) toggleMute();
-                    } else {
-                        // Swipe down - mute
-                        if (!isMuted) toggleMute();
-                    }
-                }
-                
+                // Reset values
                 startX = 0;
                 startY = 0;
+                startTime = 0;
             });
+
+            // Samsung-specific touch event handling
+            if (isSamsung) {
+                console.log('Setting up Samsung-specific touch handlers');
+                
+                // Handle Samsung Internet specific touch events
+                remoteVideo.addEventListener('gesturestart', (e) => {
+                    e.preventDefault();
+                    console.log('Samsung gesture start prevented');
+                });
+                
+                remoteVideo.addEventListener('gesturechange', (e) => {
+                    e.preventDefault();
+                    console.log('Samsung gesture change prevented');
+                });
+                
+                remoteVideo.addEventListener('gestureend', (e) => {
+                    e.preventDefault();
+                    console.log('Samsung gesture end prevented');
+                });
+            }
         }
 
         // Socket.IO event handlers with better error handling
@@ -857,16 +1211,65 @@
             if (peerConnection) {
                 try {
                     console.log('Setting remote description...');
+                    
+                    // Mobile-specific SDP modifications for better compatibility
+                    if (isMobile) {
+                        console.log('Applying mobile SDP optimizations');
+                        
+                        // Modify SDP for mobile compatibility
+                        let modifiedSdp = offer.sdp;
+                        
+                        // Force H.264 baseline profile for mobile
+                        modifiedSdp = modifiedSdp.replace(
+                            /a=rtpmap:\d+ H264\/\d+/g,
+                            (match) => {
+                                return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
+                            }
+                        );
+                        
+                        // Add mobile-specific codec preferences
+                        modifiedSdp = modifiedSdp.replace(
+                            /m=video \d+ RTP\/SAVPF/g,
+                            'm=video $1 RTP/SAVPF'
+                        );
+                        
+                        // Set lower bitrate for mobile
+                        modifiedSdp = modifiedSdp.replace(
+                            /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
+                            '$&;max-fr=30;max-fs=3600'
+                        );
+                        
+                        offer.sdp = modifiedSdp;
+                        console.log('SDP modified for mobile compatibility');
+                    }
+                    
                     await peerConnection.setRemoteDescription(offer);
                     console.log('Creating answer...');
                     
-                    // Create answer with better options
+                    // Create answer with better options and mobile support
                     const answerOptions = {
                         offerToReceiveAudio: false,
                         offerToReceiveVideo: true
                     };
                     
                     const answer = await peerConnection.createAnswer(answerOptions);
+                    
+                    // Mobile-specific answer modifications
+                    if (isMobile) {
+                        let modifiedAnswerSdp = answer.sdp;
+                        
+                        // Ensure mobile-compatible codec settings
+                        modifiedAnswerSdp = modifiedAnswerSdp.replace(
+                            /a=rtpmap:\d+ H264\/\d+/g,
+                            (match) => {
+                                return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
+                            }
+                        );
+                        
+                        answer.sdp = modifiedAnswerSdp;
+                        console.log('Answer SDP modified for mobile compatibility');
+                    }
+                    
                     await peerConnection.setLocalDescription(answer);
                     console.log('Answer created, sending to broadcaster');
                     socket.emit('answer', answer);
@@ -999,11 +1402,13 @@
             // Don't disconnect when window loses focus
         });
 
-        // Initialize browser detection
+        // Initialize browser detection and apply optimizations
         detectBrowser();
         
-        // Mobile-specific optimizations
+        // Mobile-specific optimizations and Samsung fixes
         if (isMobile) {
+            console.log('Applying mobile-specific optimizations');
+            
             // Prevent zoom on double tap
             let lastTouchEnd = 0;
             document.addEventListener('touchend', function (event) {
@@ -1022,6 +1427,43 @@
                 remoteVideo.style.webkitUserSelect = 'none';
             }
             
+            // Samsung-specific initial optimizations
+            const isSamsung = navigator.userAgent.includes('Samsung') || navigator.userAgent.includes('SM-');
+            if (isSamsung) {
+                console.log('Applying Samsung-specific initial optimizations');
+                
+                // Samsung Internet specific meta tags
+                const metaViewport = document.querySelector('meta[name="viewport"]');
+                if (metaViewport) {
+                    metaViewport.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover');
+                }
+                
+                // Samsung-specific CSS optimizations
+                document.body.style.webkitOverflowScrolling = 'touch';
+                document.body.style.overscrollBehavior = 'none';
+                
+                // Video element Samsung optimizations
+                remoteVideo.style.webkitOverflowScrolling = 'touch';
+                remoteVideo.style.overscrollBehavior = 'none';
+                remoteVideo.style.touchAction = 'manipulation';
+                
+                // Force hardware acceleration
+                remoteVideo.style.transform = 'translateZ(0)';
+                remoteVideo.style.webkitTransform = 'translateZ(0)';
+                remoteVideo.style.willChange = 'transform';
+                remoteVideo.style.backfaceVisibility = 'hidden';
+                
+                // Samsung Internet specific attributes
+                remoteVideo.setAttribute('webkit-playsinline', 'true');
+                remoteVideo.setAttribute('playsinline', 'true');
+                remoteVideo.setAttribute('muted', 'true');
+                remoteVideo.setAttribute('autoplay', 'true');
+                remoteVideo.muted = true;
+                remoteVideo.autoplay = true;
+                
+                console.log('Samsung optimizations applied');
+            }
+            
             // Landscape orientation optimization
             if (window.orientation === 90 || window.orientation === -90) {
                 document.body.classList.add('landscape');
@@ -1034,8 +1476,35 @@
                     } else {
                         document.body.classList.remove('landscape');
                     }
+                    
+                    // Samsung-specific orientation change handling
+                    if (isSamsung) {
+                        console.log('Samsung device orientation changed, reapplying optimizations');
+                        applySamsungOptimizations();
+                    }
                 }, 100);
             });
+            
+            // Samsung-specific visibility change handling
+            if (isSamsung) {
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) {
+                        console.log('Samsung device page visible, checking video state');
+                        
+                        // Check if video needs to be restarted
+                        if (remoteVideo.srcObject && remoteVideo.paused && !isPaused) {
+                            console.log('Video paused on Samsung device, attempting to resume');
+                            setTimeout(() => {
+                                if (remoteVideo.paused && !isPaused) {
+                                    remoteVideo.play().catch(e => {
+                                        console.log('Resume failed on Samsung device:', e);
+                                    });
+                                }
+                            }, 500);
+                        }
+                    }
+                });
+            }
         }
 
         // Check HTTPS requirement for WebRTC
