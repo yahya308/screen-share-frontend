@@ -304,10 +304,25 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle custom events for debugging
+  // Handle custom events for debugging and stream health
   socket.on('debug', (data) => {
     console.log(`Debug from ${socket.id}:`, data);
   });
+
+  // Handle stream health monitoring
+  socket.on('stream-health', (data) => {
+    if (data.isAlive && data.timestamp) {
+      // Stream is alive, ensure viewer keeps playing
+      socket.emit('keep-alive', { timestamp: Date.now() });
+    }
+  });
+
+  // Send periodic health checks to keep streams alive
+  setInterval(() => {
+    if (broadcasterCount > 0) {
+      io.emit('stream-health-check', { timestamp: Date.now() });
+    }
+  }, 5000);
 
   // Handle disconnect with cleanup
   socket.on('disconnect', (reason) => {

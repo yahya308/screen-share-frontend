@@ -410,7 +410,15 @@
         </div>
 
         <div class="video-container">
-            <video id="remoteVideo" autoplay muted playsinline></video>
+            <video id="remoteVideo" 
+                   autoplay 
+                   muted 
+                   playsinline 
+                   webkit-playsinline
+                   x-webkit-airplay="allow"
+                   preload="auto"
+                   loop
+                   style="transform: translateZ(0); -webkit-transform: translateZ(0);"></video>
             
             <div id="videoOverlay" class="video-overlay">
                 <div class="overlay-controls">
@@ -735,8 +743,19 @@
                 if (peerConnection.connectionState === 'connected') {
                     updateStatus('Yayın bağlandı! 🎉', 'connected');
                     isConnected = true;
+                    
+                    // Start playback monitoring for Samsung devices
+                    if (isSamsung) {
+                        startPlaybackMonitoring();
+                        setupSamsungVideoHandling();
+                    }
+                    
                 } else if (peerConnection.connectionState === 'disconnected') {
                     updateStatus('Yayın bağlantısı kesildi, yeniden bağlanılıyor...', 'waiting');
+                    
+                    // Stop playback monitoring
+                    stopPlaybackMonitoring();
+                    
                     // Don't immediately disable controls, try to reconnect
                     setTimeout(() => {
                         if (peerConnection.connectionState === 'disconnected') {
@@ -749,6 +768,10 @@
                     }, 5000); // Wait 5 seconds before giving up
                 } else if (peerConnection.connectionState === 'failed') {
                     updateStatus('Bağlantı başarısız, yeniden deneniyor...', 'waiting');
+                    
+                    // Stop playback monitoring
+                    stopPlaybackMonitoring();
+                    
                     // Try to restart connection
                     setTimeout(() => {
                         if (peerConnection && peerConnection.connectionState === 'failed') {
@@ -943,6 +966,9 @@
             playPauseBtn.textContent = '⏸️ Duraklat';
             overlayPlayPause.textContent = '⏸️ Duraklat';
             
+            // Start playback monitoring when video starts playing
+            startPlaybackMonitoring();
+            
             // Mobile-specific playing state handling
             if (isMobile) {
                 console.log('Mobile device - video is playing');
@@ -971,6 +997,18 @@
                 // Check if pause was intentional or due to mobile restrictions
                 if (remoteVideo.readyState >= 2) {
                     console.log('Video ready but paused - may be mobile autoplay restriction');
+                    
+                    // For Samsung devices, try to resume automatically
+                    if (isSamsung && isConnected) {
+                        setTimeout(() => {
+                            if (remoteVideo.paused && !isPaused) {
+                                console.log('Attempting to auto-resume on Samsung device');
+                                remoteVideo.play().catch(e => {
+                                    console.log('Auto-resume failed:', e);
+                                });
+                            }
+                        }, 500);
+                    }
                 }
             }
         });
@@ -1402,6 +1440,36 @@
             // Don't disconnect when window loses focus
         });
 
+        // Handle stream health monitoring
+        socket.on('stream-health-check', (data) => {
+            if (isConnected && remoteVideo.srcObject) {
+                // Send back health status
+                socket.emit('stream-health', {
+                    isAlive: true,
+                    timestamp: Date.now(),
+                    videoState: {
+                        paused: remoteVideo.paused,
+                        readyState: remoteVideo.readyState,
+                        currentTime: remoteVideo.currentTime
+                    }
+                });
+            }
+        });
+
+        socket.on('keep-alive', (data) => {
+            console.log('Received keep-alive from server');
+            if (isConnected && remoteVideo.paused && !isPaused) {
+                console.log('Video paused during keep-alive, attempting to resume');
+                setTimeout(() => {
+                    if (remoteVideo.paused && !isPaused) {
+                        remoteVideo.play().catch(e => {
+                            console.log('Keep-alive resume failed:', e);
+                        });
+                    }
+                }, 100);
+            }
+        });
+
         // Initialize browser detection and apply optimizations
         detectBrowser();
         
@@ -1462,6 +1530,9 @@
                 remoteVideo.autoplay = true;
                 
                 console.log('Samsung optimizations applied');
+                
+                // Setup Samsung-specific video handling immediately
+                setupSamsungVideoHandling();
             }
             
             // Landscape orientation optimization
@@ -1502,6 +1573,125 @@
                                 }
                             }, 500);
                         }
+                    }
+                });
+            }
+        }
+
+        // Video playback control functions for Samsung devices
+        async function ensureVideoPlays() {
+            if (remoteVideo.paused && isConnected) {
+                console.log('Video paused, attempting to resume...');
+                
+                // Multiple play strategies for mobile
+                const playStrategies = [
+                    () => remoteVideo.play(),
+                    () => {
+                        remoteVideo.currentTime = 0;
+                        return remoteVideo.play();
+                    },
+                    () => {
+                        remoteVideo.load();
+                        return remoteVideo.play();
+                    }
+                ];
+                
+                // Try each strategy
+                for (let i = 0; i < playStrategies.length; i++) {
+                    try {
+                        await playStrategies[i]();
+                        console.log(`Play strategy ${i + 1} successful`);
+                        break;
+                    } catch (error) {
+                        console.log(`Play strategy ${i + 1} failed:`, error);
+                        if (i === playStrategies.length - 1) {
+                            console.error('All play strategies failed');
+                        }
+                    }
+                }
+            }
+        }
+
+        // Continuous playback monitoring
+        let playbackMonitor = null;
+        function startPlaybackMonitoring() {
+            if (playbackMonitor) {
+                clearInterval(playbackMonitor);
+            }
+            
+            playbackMonitor = setInterval(() => {
+                if (isConnected && remoteVideo.paused) {
+                    console.log('Video stopped, attempting to resume...');
+                    ensureVideoPlays();
+                }
+            }, 1000);
+        }
+
+        function stopPlaybackMonitoring() {
+            if (playbackMonitor) {
+                clearInterval(playbackMonitor);
+                playbackMonitor = null;
+            }
+        }
+
+        // Samsung-specific video event handling
+        function setupSamsungVideoHandling() {
+            if (isSamsung) {
+                console.log('Setting up Samsung-specific video handling');
+                
+                // Force video to stay playing
+                remoteVideo.addEventListener('pause', (e) => {
+                    console.log('Video paused on Samsung device');
+                    if (isConnected) {
+                        setTimeout(() => {
+                            if (remoteVideo.paused) {
+                                console.log('Resuming video after pause');
+                                remoteVideo.play().catch(e => {
+                                    console.log('Resume failed:', e);
+                                });
+                            }
+                        }, 100);
+                    }
+                });
+                
+                // Prevent automatic pausing
+                remoteVideo.addEventListener('ended', (e) => {
+                    console.log('Video ended on Samsung device');
+                    if (isConnected && remoteVideo.srcObject) {
+                        console.log('Restarting video stream');
+                        remoteVideo.load();
+                        remoteVideo.play().catch(e => {
+                            console.log('Restart failed:', e);
+                        });
+                    }
+                });
+                
+                // Handle video waiting state
+                remoteVideo.addEventListener('waiting', (e) => {
+                    console.log('Video waiting on Samsung device');
+                    if (isConnected) {
+                        setTimeout(() => {
+                            if (remoteVideo.readyState >= 2) {
+                                console.log('Video ready, attempting to play');
+                                remoteVideo.play().catch(e => {
+                                    console.log('Play after waiting failed:', e);
+                                });
+                            }
+                        }, 500);
+                    }
+                });
+                
+                // Handle video stalled state
+                remoteVideo.addEventListener('stalled', (e) => {
+                    console.log('Video stalled on Samsung device');
+                    if (isConnected) {
+                        setTimeout(() => {
+                            console.log('Attempting to recover from stall');
+                            remoteVideo.load();
+                            remoteVideo.play().catch(e => {
+                                console.log('Recovery play failed:', e);
+                            });
+                        }, 1000);
                     }
                 });
             }

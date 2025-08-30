@@ -705,6 +705,9 @@
                     localVideo.style.webkitTransform = 'translateZ(0)';
                     localVideo.style.willChange = 'transform';
                     localVideo.style.backfaceVisibility = 'hidden';
+                    
+                    // Setup Samsung stream monitoring
+                    setupSamsungStreamMonitoring();
                 }
                 
                 // Log stream details
@@ -1000,6 +1003,65 @@
                 // iOS-specific optimizations
                 document.body.style.webkitUserSelect = 'none';
                 document.body.style.webkitTouchCallout = 'none';
+            }
+        }
+
+        // Samsung-specific stream monitoring
+        function setupSamsungStreamMonitoring() {
+            if (isSamsung && localStream) {
+                console.log('Setting up Samsung stream monitoring');
+                
+                // Monitor video tracks for issues
+                localStream.getVideoTracks().forEach(track => {
+                    track.addEventListener('ended', (event) => {
+                        console.log('Video track ended on Samsung device:', event);
+                        
+                        // Only stop if user explicitly ended
+                        if (event.reason === 'user') {
+                            console.log('Track ended by user, stopping broadcast');
+                            stopSharing();
+                        } else {
+                            console.log('Track ended for other reason, attempting to restart');
+                            // Try to restart the track
+                            setTimeout(() => {
+                                if (isBroadcasting && !localStream.active) {
+                                    console.log('Attempting to restart screen sharing on Samsung device');
+                                    startSharing();
+                                }
+                            }, 1000);
+                        }
+                    });
+                    
+                    // Monitor track mute/unmute
+                    track.addEventListener('mute', () => {
+                        console.log('Video track muted on Samsung device');
+                        if (isBroadcasting) {
+                            console.log('Attempting to unmute track');
+                            track.enabled = true;
+                        }
+                    });
+                    
+                    track.addEventListener('unmute', () => {
+                        console.log('Video track unmuted on Samsung device');
+                    });
+                });
+                
+                // Monitor audio tracks if present
+                if (localStream.getAudioTracks().length > 0) {
+                    localStream.getAudioTracks().forEach(track => {
+                        track.addEventListener('ended', (event) => {
+                            console.log('Audio track ended on Samsung device:', event);
+                            if (event.reason !== 'user' && isBroadcasting) {
+                                console.log('Audio track ended unexpectedly, attempting to restart');
+                                setTimeout(() => {
+                                    if (isBroadcasting) {
+                                        startSharing();
+                                    }
+                                }, 1000);
+                            }
+                        });
+                    });
+                }
             }
         }
     </script>
