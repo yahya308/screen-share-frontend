@@ -76,7 +76,6 @@ npm run dev
 | Firefox   | ✅       | ✅    | ✅      |
 | Safari    | ✅       | ✅    | ✅      |
 | Edge      | ✅       | ✅    | ✅      |
-| Samsung Internet | ✅ | ✅ | ✅ **Özel Optimize** |
 
 ## 🚀 Performans
 
