@@ -152,75 +152,87 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle WebRTC offer with validation and mobile optimization
-  socket.on('offer', (offer) => {
-    try {
-      if (!offer || !offer.sdp) {
-        console.error('Invalid offer received from:', socket.id);
-        socket.emit('error', 'Invalid offer format');
-        return;
+  // SDP codec preference utility
+  function preferCodecs(sdp, preferredCodecs) {
+    // preferredCodecs: array of codec names in order, e.g. ['H264', 'VP9', 'VP8']
+    const lines = sdp.split('\n');
+    const mLineIndex = lines.findIndex(line => line.startsWith('m=video'));
+    if (mLineIndex === -1) return sdp;
+
+    // Find all payload types and their codec names
+    const rtpmap = {};
+    lines.forEach(line => {
+      const match = line.match(/^a=rtpmap:(\d+) ([^\/]+)\//);
+      if (match) {
+        rtpmap[match[1]] = match[2].toUpperCase();
       }
+    });
 
-      console.log(`Offer received from ${socket.id}, SDP length: ${offer.sdp.length}`);
+    // Build new payload type order
+    const mLine = lines[mLineIndex].split(' ');
+    const header = mLine.slice(0, 3);
+    const payloads = mLine.slice(3);
+    const sorted = [];
+    preferredCodecs.forEach(codec => {
+      Object.entries(rtpmap).forEach(([pt, name]) => {
+        if (name === codec.toUpperCase() && !sorted.includes(pt)) sorted.push(pt);
+      });
+    });
+    // Add the rest
+    payloads.forEach(pt => { if (!sorted.includes(pt)) sorted.push(pt); });
+    lines[mLineIndex] = [...header, ...sorted].join(' ');
+    return lines.join('\n');
+  }
 
-      // Mobile-specific SDP optimization
-      const connection = activeConnections.get(socket.id);
-      if (connection && connection.isMobile) {
-        console.log(`Mobile device offer detected, applying optimizations`);
-        
-        // Optimize SDP for mobile devices
-        let optimizedSdp = offer.sdp;
-        
-        // Force H.264 baseline profile for mobile compatibility
-        optimizedSdp = optimizedSdp.replace(
-          /a=rtpmap:\d+ H264\/\d+/g,
-          (match) => {
-            return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
-          }
-        );
-        
-        // Samsung-specific optimizations
-        if (connection.isSamsung) {
-          console.log(`Samsung device offer, applying specific optimizations`);
-          
-          // Lower bitrate for Samsung devices
-          optimizedSdp = optimizedSdp.replace(
-            /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
-            '$&;max-fr=30;max-fs=3600'
-          );
-          
-          // Force specific codec settings
-          optimizedSdp = optimizedSdp.replace(
-            /m=video \d+ RTP\/SAVPF/g,
-            'm=video $1 RTP/SAVPF'
-          );
+  // Handle WebRTC offer with dynamic codec preference
+    socket.on('offer', (offer) => {
+      try {
+        if (!offer || !offer.sdp) {
+          console.error('Invalid offer received from:', socket.id);
+          socket.emit('error', 'Invalid offer format');
+          return;
         }
-        
-        offer.sdp = optimizedSdp;
-        console.log('SDP optimized for mobile device');
-      }
 
-      // Validate SDP format
-      if (offer.sdp.includes('v=0') && offer.sdp.includes('m=video')) {
-        socket.broadcast.emit('offer', offer);
-        console.log('Offer forwarded successfully');
+        console.log(`Offer received from ${socket.id}, SDP length: ${offer.sdp.length}`);
 
-        // Update activity
+        // Codec preference: H264 > VP9 > VP8
+        offer.sdp = preferCodecs(offer.sdp, ['H264', 'VP9', 'VP8']);
+
+        // Mobile-specific SDP optimization (ekstra manipülasyonlar istenirse buraya eklenebilir)
         const connection = activeConnections.get(socket.id);
-        if (connection) {
-          connection.lastActivity = new Date();
+        if (connection && connection.isMobile) {
+          console.log(`Mobile device offer detected, applying optimizations`);
+          // Samsung-specific optimizations
+          if (connection.isSamsung) {
+            console.log(`Samsung device offer, applying specific optimizations`);
+            offer.sdp = offer.sdp.replace(
+              /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
+              '$&;max-fr=30;max-fs=3600'
+            );
+          }
         }
-      } else {
-        console.error('Invalid SDP format in offer from:', socket.id);
-        socket.emit('error', 'Invalid SDP format');
-      }
-    } catch (error) {
-      console.error('Error handling offer:', error);
-      socket.emit('error', 'Offer processing failed');
-    }
-  });
 
-  // Handle WebRTC answer with validation and mobile optimization
+        // Validate SDP format
+        if (offer.sdp.includes('v=0') && offer.sdp.includes('m=video')) {
+          socket.broadcast.emit('offer', offer);
+          console.log('Offer forwarded successfully');
+
+          // Update activity
+          const connection = activeConnections.get(socket.id);
+          if (connection) {
+            connection.lastActivity = new Date();
+          }
+        } else {
+          console.error('Invalid SDP format in offer from:', socket.id);
+          socket.emit('error', 'Invalid SDP format');
+        }
+      } catch (error) {
+        console.error('Error handling offer:', error);
+        socket.emit('error', 'Offer processing failed');
+      }
+    });
+
+  // Handle WebRTC answer with dynamic codec preference
   socket.on('answer', (answer) => {
     try {
       if (!answer || !answer.sdp) {
@@ -231,35 +243,21 @@ io.on('connection', (socket) => {
 
       console.log(`Answer received from ${socket.id}, SDP length: ${answer.sdp.length}`);
 
-      // Mobile-specific SDP optimization
+      // Codec preference: H264 > VP9 > VP8
+      answer.sdp = preferCodecs(answer.sdp, ['H264', 'VP9', 'VP8']);
+
+      // Mobile-specific SDP optimization (ekstra manipülasyonlar istenirse buraya eklenebilir)
       const connection = activeConnections.get(socket.id);
       if (connection && connection.isMobile) {
         console.log(`Mobile device answer detected, applying optimizations`);
-        
-        // Optimize SDP for mobile devices
-        let optimizedSdp = answer.sdp;
-        
-        // Ensure mobile-compatible codec settings
-        optimizedSdp = optimizedSdp.replace(
-          /a=rtpmap:\d+ H264\/\d+/g,
-          (match) => {
-            return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
-          }
-        );
-        
         // Samsung-specific optimizations
         if (connection.isSamsung) {
           console.log(`Samsung device answer, applying specific optimizations`);
-          
-          // Lower bitrate for Samsung devices
-          optimizedSdp = optimizedSdp.replace(
+          answer.sdp = answer.sdp.replace(
             /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
             '$&;max-fr=30;max-fs=3600'
           );
         }
-        
-        answer.sdp = optimizedSdp;
-        console.log('Answer SDP optimized for mobile device');
       }
 
       // Validate SDP format
