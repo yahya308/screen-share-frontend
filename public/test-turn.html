@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TURN Server Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.95rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .status.testing {
+            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.success {
+            background: linear-gradient(135deg, #d4edda, #c3e6cb);
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.warning {
+            background: linear-gradient(135deg, #e7f3ff, #d1ecf1);
+            color: #004085;
+            border: 1px solid #d1ecf1;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+        }
+        
+        button:hover {
+            background: linear-gradient(135deg, #0056b3, #004085);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,123,255,0.4);
+        }
+        
+        button:disabled {
+            background: linear-gradient(135deg, #6c757d, #5a6268);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 8px rgba(108,117,125,0.3);
+        }
+        
+        .results {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+            font-family: monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .info {
+            background: linear-gradient(135deg, #e7f3ff, #d1ecf1);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 TURN Server Test</h1>
+        
+        <div class="info">
+            <strong>Bu test sayfası TURN sunucusunun çalışıp çalışmadığını kontrol eder.</strong><br>
+            Test, WebRTC ICE adaylarını toplar ve TURN sunucusundan gelen adayları arar.
+        </div>
+        
+        <div id="status" class="status testing">
+            <span class="loading"></span>
+            Test başlatılıyor...
+        </div>
+        
+        <div class="results" id="results" style="display: none;"></div>
+        
+        <div style="text-align: center;">
+            <button id="testButton" onclick="runTurnTest()">🔄 TURN Sunucusunu Test Et</button>
+            <button id="clearButton" onclick="clearResults()">🗑️ Sonuçları Temizle</button>
+        </div>
+        
+        <div class="info">
+            <strong>Beklenen Sonuçlar:</strong><br>
+            ✅ <strong>Başarılı:</strong> TURN sunucusu adayları bulundu<br>
+            ⚠️ <strong>Uyarı:</strong> TURN adayları bulunamadı (STUN yeterli olabilir)<br>
+            ❌ <strong>Hata:</strong> TURN sunucusuna bağlanılamadı
+        </div>
+    </div>
+
+    <script>
+        let testResults = [];
+        
+        function updateStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = type === 'testing' ? 
+                `<span class="loading"></span>${message}` : 
+                message;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        function addResult(message) {
+            testResults.push(`[${new Date().toLocaleTimeString()}] ${message}`);
+            updateResults();
+        }
+        
+        function updateResults() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.textContent = testResults.join('\n');
+            resultsDiv.style.display = 'block';
+        }
+        
+        function clearResults() {
+            testResults = [];
+            document.getElementById('results').style.display = 'none';
+            updateStatus('Test başlatılıyor...', 'testing');
+        }
+        
+        async function runTurnTest() {
+            const testButton = document.getElementById('testButton');
+            testButton.disabled = true;
+            
+            testResults = [];
+            updateStatus('TURN sunucusu test ediliyor...', 'testing');
+            addResult('🔄 TURN sunucusu testi başlatıldı');
+            
+            try {
+                // Enhanced configuration with multiple STUN servers
+                const configuration = {
+                    iceServers: [
+                        // Primary STUN servers
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' },
+                        
+                        // Additional STUN servers
+                        { urls: 'stun:global.stun.twilio.com:3478' },
+                        { urls: 'stun:stun.cloudflare.com:3478' },
+                        { urls: 'stun:stun.nextcloud.com:3478' },
+                        { urls: 'stun:stun.voiparound.com' },
+                        { urls: 'stun:stun.voipbuster.com' },
+                        { urls: 'stun:stun.voipstunt.com' },
+                        
+                        // TURN server (may not be available)
+                        { 
+                            urls: 'turn:78.47.162.63:3478',
+                            username: 'turnuser',
+                            credential: 'turnpass'
+                        },
+                        { 
+                            urls: 'turn:78.47.162.63:3478?transport=tcp',
+                            username: 'turnuser',
+                            credential: 'turnpass'
+                        }
+                    ],
+                    iceCandidatePoolSize: 10
+                };
+                
+                addResult('📡 ICE sunucuları yapılandırıldı');
+                addResult(`   - STUN: stun.l.google.com:19302`);
+                addResult(`   - TURN: 78.47.162.63:3478 (UDP)`);
+                addResult(`   - TURN: 78.47.162.63:3478 (TCP)`);
+                
+                const pc = new RTCPeerConnection(configuration);
+                let turnCandidateFound = false;
+                let stunCandidateFound = false;
+                let totalCandidates = 0;
+                
+                addResult('🔄 RTCPeerConnection oluşturuldu');
+                
+                // Set up event handlers
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        totalCandidates++;
+                        const candidate = event.candidate.candidate;
+                        addResult(`📡 ICE Adayı #${totalCandidates}: ${candidate}`);
+                        
+                        if (candidate.includes('78.47.162.63')) {
+                            turnCandidateFound = true;
+                            addResult('✅ TURN sunucusu adayı bulundu!');
+                        } else if (candidate.includes('typ relay')) {
+                            turnCandidateFound = true;
+                            addResult('✅ TURN relay adayı bulundu!');
+                        } else if (candidate.includes('typ srflx')) {
+                            stunCandidateFound = true;
+                            addResult('📡 STUN adayı bulundu');
+                        }
+                    }
+                };
+                
+                pc.onicegatheringstatechange = () => {
+                    addResult(`🔄 ICE toplama durumu: ${pc.iceGatheringState}`);
+                    
+                    if (pc.iceGatheringState === 'complete') {
+                        addResult('📊 ICE toplama tamamlandı');
+                        
+                        // Analyze results
+                        if (turnCandidateFound) {
+                            updateStatus('✅ TURN sunucusu testi BAŞARILI!', 'success');
+                            addResult('🎉 TURN sunucusu çalışıyor ve erişilebilir');
+                            addResult('💡 TURN sunucusu aktif - en iyi bağlantı kalitesi');
+                        } else if (stunCandidateFound) {
+                            updateStatus('⚠️ TURN sunucusu mevcut değil (STUN yeterli)', 'warning');
+                            addResult('💡 TURN sunucusu yanıt vermiyor, ancak STUN çalışıyor');
+                            addResult('💡 Çoğu durumda STUN yeterli olacaktır');
+                            addResult('💡 TURN sunucusu olmadan da bağlantı kurulabilir');
+                        } else {
+                            updateStatus('❌ WebRTC bağlantı testi BAŞARISIZ', 'error');
+                            addResult('❌ Hiçbir ICE adayı bulunamadı');
+                            addResult('❌ Ağ bağlantısı veya güvenlik duvarı sorunu olabilir');
+                        }
+                        
+                        addResult(`📊 Toplam aday sayısı: ${totalCandidates}`);
+                        addResult(`📊 TURN adayları: ${turnCandidateFound ? 'Evet' : 'Hayır'}`);
+                        addResult(`📊 STUN adayları: ${stunCandidateFound ? 'Evet' : 'Hayır'}`);
+                        
+                        pc.close();
+                        testButton.disabled = false;
+                    }
+                };
+                
+                // Create a data channel to trigger ICE gathering
+                addResult('🔄 Veri kanalı oluşturuluyor...');
+                pc.createDataChannel('test');
+                
+                // Create an offer to start ICE gathering
+                addResult('🔄 Offer oluşturuluyor...');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                addResult('✅ Offer ayarlandı, ICE toplama başladı');
+                
+                // Set timeout
+                setTimeout(() => {
+                    if (pc.iceGatheringState !== 'complete') {
+                        addResult('⏰ Test zaman aşımına uğradı (15 saniye)');
+                        addResult('💡 TURN sunucusu yanıt vermiyor olabilir');
+                        addResult('💡 STUN sunucuları çalışıyor, bu yeterli olabilir');
+                        
+                        if (stunCandidateFound) {
+                            updateStatus('⚠️ TURN sunucusu mevcut değil (STUN çalışıyor)', 'warning');
+                            addResult('✅ STUN sunucuları çalışıyor - bağlantı kurulabilir');
+                        } else {
+                            updateStatus('❌ WebRTC bağlantı sorunu', 'error');
+                            addResult('❌ STUN sunucuları da yanıt vermiyor');
+                        }
+                        
+                        pc.close();
+                        testButton.disabled = false;
+                    }
+                }, 15000);
+                
+            } catch (error) {
+                addResult(`❌ Test hatası: ${error.message}`);
+                updateStatus('❌ Test başarısız: ' + error.message, 'error');
+                testButton.disabled = false;
+            }
+        }
+        
+        // Auto-start test when page loads
+        window.addEventListener('load', () => {
+            setTimeout(runTurnTest, 1000);
+        });
+    </script>
+</body>
+</html>

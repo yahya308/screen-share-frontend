@@ -34,6 +34,22 @@ npm start
 npm run dev
 ```
 
+### 🔐 TURN Ortam Değişkenleri
+`.env` veya Vercel/Render gibi platformların çevre değişkeni ekranına aşağıdaki değerleri ekleyin (örnekler Hetzner sunucusu içindir, kendi IP/secret bilginize göre güncelleyin):
+
+```
+TURN_HOST=88.198.242.187
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_ENABLE_TLS=true
+TURN_TRANSPORTS=udp,tcp
+TURN_SECRET=f9dfa5c775b3ff13b8378f67f6e37c05
+TURN_REALM=screenshare-delta.vercel.app
+TURN_TTL_SECONDS=3600
+```
+
+Sunucu yeniden başlatıldığında `/ice-config` endpoint'i bu değerleri kullanarak istemcilere dinamik, HMAC imzalı giriş bilgileri döndürür.
+
 ## 🌐 Kullanım
 
 ### 📺 Yayıncı

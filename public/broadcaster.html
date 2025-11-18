@@ -339,11 +339,28 @@
             1. Kalite ayarlarını yapın (1080p 60fps önerilen)<br>
             2. "Ekranını Paylaş" butonuna tıklayın<br>
             3. Paylaşmak istediğiniz ekranı seçin<br>
-            4. İzleyici <a href="/watch" target="_blank">bu linke</a> tıklayarak bağlanabilir
+            4. İzleyici <a href="/watch" target="_blank">bu linke</a> tıklayarak bağlanabilir<br>
+            <br>
+            📊 <a href="/test" target="_blank" style="color: #007bff; font-weight: 600;">Detaylı Ağ Hızı Testi</a> | 🧪 <a href="/test-turn" target="_blank" style="color: #007bff; font-weight: 600;">TURN Sunucu Testi</a>
         </div>
 
         <div class="quality-controls">
             <h3>🎛️ Kalite Ayarları</h3>
+            <div class="control-group">
+                <label>👥 İzleyici Sayısı (beklenen):
+                    <input type="number" id="expectedViewers" value="1" min="1" max="50" step="1" placeholder="1">
+                </label>
+                <label>🌐 Ağ Testi:
+                    <button id="networkTestButton">📡 Ağı Test Et</button>
+                </label>
+                <label>🧮 Öneri Aracı:
+                    <button id="calcRecommendationsButton">🧠 Önerileri Hesapla</button>
+                </label>
+            </div>
+            <div id="networkTestResult" class="browser-info" style="display:none;"></div>
+            <div id="qualityPresets" class="browser-info" style="display:none; text-align:left;"></div>
+            <div id="recommendationInfo" class="browser-info" style="display:none;"></div>
+            <div id="recommendationResults" class="info" style="display:none; text-align:left;"></div>
             <div class="control-group">
                 <label>📱 Çözünürlük:
                     <select id="resolution">
@@ -408,6 +425,13 @@
         const fpsSelect = document.getElementById('fps');
         const bitrateInput = document.getElementById('bitrate');
         const audioEnabledSelect = document.getElementById('audioEnabled');
+        const expectedViewersInput = document.getElementById('expectedViewers');
+        const networkTestButton = document.getElementById('networkTestButton');
+        const networkTestResultDiv = document.getElementById('networkTestResult');
+        const qualityPresetsDiv = document.getElementById('qualityPresets');
+        const calcRecommendationsButton = document.getElementById('calcRecommendationsButton');
+        const recommendationInfoDiv = document.getElementById('recommendationInfo');
+        const recommendationResultsDiv = document.getElementById('recommendationResults');
 
         let localStream = null;
         let peerConnection = null;
@@ -482,17 +506,29 @@
             return { browser, isSupported };
         }
 
-        // WebRTC configuration with better STUN/TURN servers
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
-            ],
-            iceCandidatePoolSize: 10
-        };
+        // Dynamic ICE configuration fetched from server (fallback to STUN-only if fetch fails)
+        let configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 10 };
+        async function loadIceConfig() {
+            try {
+                const res = await fetch('/ice-config', { cache: 'no-store' });
+                if (!res.ok) throw new Error('ICE config fetch failed');
+                const data = await res.json();
+                if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+                    configuration = {
+                        iceServers: data.iceServers,
+                        iceCandidatePoolSize: data.iceCandidatePoolSize || 10
+                    };
+                    console.log('Loaded ICE config from server:', configuration);
+                } else {
+                    console.warn('ICE config missing iceServers, using default STUN');
+                }
+            } catch (e) {
+                console.warn('Failed to load ICE config, using default STUN only:', e);
+            }
+        }
+
+        // Prefer both IPv4 and IPv6 candidates if available
+        const preferIPv6 = true;
 
         // Get video constraints based on selected quality and device capabilities with Samsung optimization
         function getVideoConstraints() {
@@ -557,9 +593,12 @@
         }
 
         // Initialize WebRTC connection with better settings
-        function initializePeerConnection() {
+        async function initializePeerConnection() {
             console.log('Creating RTCPeerConnection for broadcaster...');
             
+            // Ensure ICE configuration is loaded before creating connection
+            await loadIceConfig();
+
             // Enhanced configuration for better quality
             const enhancedConfig = {
                 ...configuration,
@@ -871,6 +910,209 @@
         shareButton.addEventListener('touchend', startSharing);
         stopButton.addEventListener('click', stopSharing);
         stopButton.addEventListener('touchend', stopSharing);
+
+        // Network test and preset suggestion
+        function humanMbps(bitsPerSec) {
+            return (bitsPerSec / 1e6).toFixed(1);
+        }
+
+        // Keep last measured upload for recommendation tool (in kbps)
+        let lastMeasuredUploadKbps = null;
+
+        function buildPresets(availableUploadBps, expectedViewers) {
+            // Reserve ~25% headroom and 128 kbps for audio per viewer
+            const headroom = 0.75;
+            const perViewerAudio = 128000;
+            const usableBps = Math.max(0, availableUploadBps * headroom - expectedViewers * perViewerAudio);
+
+            // Candidate presets [name, width, height, fps, videoBitrate]
+            const candidates = [
+                { name: '1080p60', w: 1920, h: 1080, fps: 60, vb: 15000000 },
+                { name: '1080p30', w: 1920, h: 1080, fps: 30, vb: 9000000 },
+                { name: '720p60',  w: 1280, h: 720,  fps: 60, vb: 8000000 },
+                { name: '720p30',  w: 1280, h: 720,  fps: 30, vb: 5000000 },
+                { name: '480p60',  w: 854,  h: 480,  fps: 60, vb: 3500000 },
+                { name: '480p30',  w: 854,  h: 480,  fps: 30, vb: 2000000 }
+            ];
+
+            // Each viewer receives the same stream; upstream cost ~ vb + audio, not multiplied by viewers for SFU-like broadcast.
+            // For p2p fanout, cost scales by viewers; we assume p2p-fanout here: multiply by expectedViewers.
+            const scaleByViewers = true;
+
+            const fits = candidates.filter(p => {
+                const perViewerTotal = p.vb + perViewerAudio;
+                const totalNeeded = scaleByViewers ? perViewerTotal * expectedViewers : perViewerTotal;
+                return totalNeeded <= usableBps;
+            });
+
+            // Return top 3 best within capacity, else suggest the highest possible with warning
+            return fits.slice(0, 3);
+        }
+
+        async function runNetworkTest() {
+            try {
+                networkTestResultDiv.style.display = 'block';
+                // Timed test with visible countdown
+                const durationSec = 3; // keep it short and predictable
+                let remaining = durationSec;
+                networkTestResultDiv.textContent = `📡 Ağ testi başlatıldı... (${remaining.toFixed(1)} sn)`;
+
+                // Random payload generator (avoids compression)
+                function makePayload(bytes) {
+                    const arr = new Uint8Array(bytes);
+                    for (let i = 0; i < bytes; i += 4096) arr[i] = Math.floor(Math.random() * 256);
+                    return arr;
+                }
+
+                // Loop small uploads for a fixed duration
+                const chunkBytes = 512 * 1024; // 512 KB per request
+                let totalBytes = 0;
+                const startAll = performance.now();
+                const tick = setInterval(() => {
+                    const elapsed = (performance.now() - startAll) / 1000;
+                    remaining = Math.max(0, durationSec - elapsed);
+                    networkTestResultDiv.textContent = `📡 Ağ testi sürüyor... (${remaining.toFixed(1)} sn)`;
+                }, 100);
+
+                while ((performance.now() - startAll) / 1000 < durationSec) {
+                    const payload = makePayload(chunkBytes);
+                    const res = await fetch('/upload-test', {
+                        method: 'POST',
+                        cache: 'no-store',
+                        headers: {
+                            'Content-Type': 'application/octet-stream',
+                            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                            'Pragma': 'no-cache'
+                        },
+                        body: payload
+                    });
+                    const json = await res.json();
+                    totalBytes += json.receivedBytes || 0;
+                }
+                clearInterval(tick);
+                const endAll = performance.now();
+                const measuredSec = Math.max(0.001, (endAll - startAll) / 1000);
+                const bps = (totalBytes * 8) / measuredSec;
+
+                const viewers = Math.max(1, parseInt(expectedViewersInput.value) || 1);
+                const presets = buildPresets(bps, viewers);
+
+                const isLocal = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+                const localNote = isLocal ? ' (Yerel test: internet upload hızınızı yansıtmaz)' : '';
+                networkTestResultDiv.innerHTML = `🔼 Upload: ${humanMbps(bps)} Mbps · İzleyici: ${viewers}${localNote}`;
+                // Save last measurement for the recommendation tool
+                lastMeasuredUploadKbps = Math.round(bps / 1000);
+                recommendationInfoDiv.style.display = 'block';
+                recommendationInfoDiv.textContent = `Upload ölçümü tamamlandı: ~${(lastMeasuredUploadKbps/1000).toFixed(1)} Mbps`;
+
+                if (presets.length === 0) {
+                    qualityPresetsDiv.style.display = 'block';
+                    qualityPresetsDiv.innerHTML = '⚠️ Bant genişliği düşük. 480p30 ve düşük bitrate önerilir.';
+                    return;
+                }
+
+                // Render buttons for presets
+                qualityPresetsDiv.style.display = 'block';
+                qualityPresetsDiv.innerHTML = '<strong>Önerilen Kalite Seçenekleri:</strong><br/>';
+                presets.forEach(p => {
+                    const btn = document.createElement('button');
+                    btn.textContent = `${p.name} (${p.w}x${p.h} @ ${p.fps} • ${(p.vb/1000).toFixed(0)} kbps video)`;
+                    btn.style.margin = '6px';
+                    btn.onclick = () => {
+                        resolutionSelect.value = `${p.w}x${p.h}`;
+                        fpsSelect.value = String(p.fps);
+                        bitrateInput.value = Math.round(p.vb / 1000);
+                    };
+                    qualityPresetsDiv.appendChild(btn);
+                });
+            } catch (e) {
+                networkTestResultDiv.style.display = 'block';
+                networkTestResultDiv.textContent = 'Ağ testi başarısız: ' + (e.message || e);
+            }
+        }
+
+        networkTestButton.addEventListener('click', runNetworkTest);
+
+        // Remove background auto-measure; measurement happens only when user triggers Network Test
+
+        // Recommendation logic based on fixed ordered table (from highest to lowest quality)
+        function computeRecommendations(uploadKbps, viewers) {
+            const safetyFactor = 0.75; // use only 75% of measured upload
+            const usableUploadKbps = Math.floor(uploadKbps * safetyFactor);
+
+            // Predefined quality ladder (sorted descending by quality)
+            const ladder = [
+                { label: 'Maksimum Kalite', res: '1920x1080', fps: 60, bitrateKbps: 8000 },
+                { label: 'Yüksek Kalite',   res: '1920x1080', fps: 30, bitrateKbps: 6000 },
+                { label: 'Dengeli Kalite',  res: '1280x720',  fps: 60, bitrateKbps: 4500 },
+                { label: 'Standart Kalite', res: '1280x720',  fps: 30, bitrateKbps: 3000 },
+                { label: 'Temel Kalite',    res: '854x480',   fps: 30, bitrateKbps: 1500 }
+            ];
+
+            const fits = [];
+            for (const option of ladder) {
+                const requiredTotal = option.bitrateKbps * viewers; // P2P fanout: scales by viewers
+                if (requiredTotal <= usableUploadKbps) fits.push(option);
+                if (fits.length === 3) break;
+            }
+            return { usableUploadKbps, fits };
+        }
+
+        // Render recommendation results and wire apply buttons
+        function renderRecommendations(uploadKbps, viewers, usableUploadKbps, fits) {
+            recommendationInfoDiv.style.display = 'block';
+            recommendationResultsDiv.style.display = 'block';
+            const isLocal = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+            const localNote = isLocal ? ' (Yerel test: internet upload hızınızı yansıtmayabilir)' : '';
+            recommendationInfoDiv.innerHTML = `Upload Hızınız: ~${(uploadKbps/1000).toFixed(1)} Mbps · Güvenli Kullanım: ~${(usableUploadKbps/1000).toFixed(1)} Mbps · İzleyici: ${viewers}${localNote}`;
+
+            if (fits.length === 0) {
+                recommendationResultsDiv.innerHTML = '⚠️ Mevcut upload hızınız bu izleyici sayısı için yeterli değil. Lütfen izleyici sayısını azaltın veya kaliteyi düşürün.';
+                return;
+            }
+
+            const items = fits.map(f => {
+                const [w, h] = f.res.split('x');
+                return `
+                    <div style="margin:8px 0; padding:8px; border:1px solid #dee2e6; border-radius:8px;">
+                        <strong>${f.label}</strong>: ${w}x${h} - ${f.fps} FPS (${f.bitrateKbps} kbps)
+                        <div style="margin-top:6px;">
+                            <button class="control-btn" data-res="${f.res}" data-fps="${f.fps}" data-bitrate="${f.bitrateKbps}">Uygula</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            recommendationResultsDiv.innerHTML = items;
+
+            // Attach handlers to apply buttons
+            recommendationResultsDiv.querySelectorAll('button[data-res]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const res = btn.getAttribute('data-res');
+                    const fps = btn.getAttribute('data-fps');
+                    const br = btn.getAttribute('data-bitrate');
+                    resolutionSelect.value = res;
+                    fpsSelect.value = String(fps);
+                    bitrateInput.value = String(br);
+                });
+            });
+        }
+
+        // Handle click: calculate recommendations from last measurement (or measure now)
+        calcRecommendationsButton.addEventListener('click', async () => {
+            try {
+                const viewers = Math.max(1, parseInt(expectedViewersInput.value) || 1);
+                if (!lastMeasuredUploadKbps) {
+                    recommendationInfoDiv.style.display = 'block';
+                    recommendationInfoDiv.textContent = 'Önce Ağ Testi yapmalısınız.';
+                    return;
+                }
+                const { usableUploadKbps, fits } = computeRecommendations(lastMeasuredUploadKbps, viewers);
+                renderRecommendations(lastMeasuredUploadKbps, viewers, usableUploadKbps, fits);
+            } catch (e) {
+                recommendationInfoDiv.style.display = 'block';
+                recommendationInfoDiv.textContent = 'Öneri hesaplama hatası: ' + (e.message || e);
+            }
+        });
 
         // Socket.IO event handlers
         socket.on('viewer', async () => {

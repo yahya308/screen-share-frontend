@@ -385,6 +385,7 @@
         </div>
 
         <div id="browserInfo" class="browser-info"></div>
+        <div id="diagnostics" class="browser-info" style="display:none; text-align:left; white-space:pre-wrap"></div>
 
         <div id="status" class="status waiting">
             <span class="loading-spinner"></span>
@@ -449,6 +450,7 @@
         const playPauseBtn = document.getElementById('playPauseBtn');
         const muteBtn = document.getElementById('muteBtn');
         const browserInfoDiv = document.getElementById('browserInfo');
+        const diagnosticsDiv = document.getElementById('diagnostics');
         const qualityInfoDiv = document.getElementById('qualityInfo');
         const videoQualitySpan = document.getElementById('videoQuality');
         const videoOverlay = document.getElementById('videoOverlay');
@@ -502,22 +504,47 @@
             return { browser, isSupported };
         }
 
-        // WebRTC configuration with better STUN/TURN servers and mobile optimization
-        const configuration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
-            ],
-            iceCandidatePoolSize: 10,
-            // Mobile-specific optimizations
-            bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require',
-            iceTransportPolicy: 'all',
-            sdpSemantics: 'unified-plan'
-        };
+        // Dynamic ICE configuration fetched from server (fallback to STUN-only if fetch fails)
+        let configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 10 };
+        async function loadIceConfig() {
+            try {
+                const res = await fetch('/ice-config', { cache: 'no-store' });
+                if (!res.ok) throw new Error('ICE config fetch failed');
+                const data = await res.json();
+                if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+                    configuration = {
+                        iceServers: data.iceServers,
+                        iceCandidatePoolSize: data.iceCandidatePoolSize || 10,
+                        // Mobile-specific optimizations
+                        bundlePolicy: 'max-bundle',
+                        rtcpMuxPolicy: 'require',
+                        iceTransportPolicy: 'all',
+                        sdpSemantics: 'unified-plan'
+                    };
+                    console.log('Loaded ICE config from server:', configuration);
+                } else {
+                    console.warn('ICE config missing iceServers, using default STUN');
+                    configuration = {
+                        ...configuration,
+                        // Mobile-specific optimizations
+                        bundlePolicy: 'max-bundle',
+                        rtcpMuxPolicy: 'require',
+                        iceTransportPolicy: 'all',
+                        sdpSemantics: 'unified-plan'
+                    };
+                }
+            } catch (e) {
+                console.warn('Failed to load ICE config, using default STUN only:', e);
+                configuration = {
+                    ...configuration,
+                    // Mobile-specific optimizations
+                    bundlePolicy: 'max-bundle',
+                    rtcpMuxPolicy: 'require',
+                    iceTransportPolicy: 'all',
+                    sdpSemantics: 'unified-plan'
+                };
+            }
+        }
 
         // Mobile-specific video constraints
         function getMobileVideoConstraints() {
@@ -584,8 +611,9 @@
         }
 
         // Initialize WebRTC connection with better settings and mobile optimization
-        function initializePeerConnection() {
+        async function initializePeerConnection() {
             console.log('Creating RTCPeerConnection...');
+            await loadIceConfig();
             
             // Enhanced configuration for better quality and mobile support
             const enhancedConfig = {
@@ -596,6 +624,29 @@
             
             peerConnection = new RTCPeerConnection(enhancedConfig);
             console.log('RTCPeerConnection created successfully');
+
+            // Diagnostics helpers
+            const diag = {
+                candidates: 0,
+                iceConnectionState: '-',
+                connectionState: '-',
+                signalingState: '-',
+                lastError: '-',
+                selectedCandidatePair: '-' 
+            };
+            function renderDiag() {
+                diagnosticsDiv.style.display = 'block';
+                diagnosticsDiv.textContent = `ICE: ${diag.iceConnectionState}\nConn: ${diag.connectionState}\nSignal: ${diag.signalingState}\nCandidates: ${diag.candidates}\nSelected: ${diag.selectedCandidatePair}\nLastError: ${diag.lastError}`;
+            }
+
+            // Ensure we are prepared to receive audio in Unified Plan
+            try {
+                if (peerConnection.addTransceiver) {
+                    peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+                }
+            } catch (e) {
+                console.log('addTransceiver audio not available:', e);
+            }
 
             // Apply Samsung-specific optimizations
             applySamsungOptimizations();
@@ -625,6 +676,11 @@
                 fullscreenBtn.disabled = false;
                 playPauseBtn.disabled = false;
                 muteBtn.disabled = false;
+
+                // Sync mute state and button labels with actual video element state
+                isMuted = !!remoteVideo.muted;
+                muteBtn.textContent = isMuted ? '🔊 Ses Aç' : '🔇 Sessiz';
+                overlayMute.textContent = isMuted ? '🔊 Ses Aç' : '🔇 Sessiz';
                 
                 // Try to play immediately with better error handling and mobile support
                 console.log('Stream set to video element, attempting to play...');
@@ -734,12 +790,16 @@
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
                     socket.emit('ice-candidate', event.candidate);
+                    diag.candidates += 1;
+                    renderDiag();
                 }
             };
 
             // Handle connection state changes
             peerConnection.onconnectionstatechange = () => {
                 console.log('Connection state:', peerConnection.connectionState);
+                diag.connectionState = peerConnection.connectionState;
+                renderDiag();
                 if (peerConnection.connectionState === 'connected') {
                     updateStatus('Yayın bağlandı! 🎉', 'connected');
                     isConnected = true;
@@ -768,6 +828,19 @@
                     }, 5000); // Wait 5 seconds before giving up
                 } else if (peerConnection.connectionState === 'failed') {
                     updateStatus('Bağlantı başarısız, yeniden deneniyor...', 'waiting');
+                    try {
+                        const stats = peerConnection.getStats ? peerConnection.getStats(null) : null;
+                        Promise.resolve(stats).then(report => {
+                            if (!report) return;
+                            report.forEach(stat => {
+                                if (stat.type === 'transport' && stat.selectedCandidatePairId) {
+                                    const pair = report.get(stat.selectedCandidatePairId);
+                                    if (pair) diag.selectedCandidatePair = `${pair.localCandidateId} ⇄ ${pair.remoteCandidateId}`;
+                                }
+                            });
+                            renderDiag();
+                        });
+                    } catch(e) { diag.lastError = String(e); renderDiag(); }
                     
                     // Stop playback monitoring
                     stopPlaybackMonitoring();
@@ -788,6 +861,8 @@
             // Handle ICE connection state
             peerConnection.oniceconnectionstatechange = () => {
                 console.log('ICE connection state:', peerConnection.iceConnectionState);
+                diag.iceConnectionState = peerConnection.iceConnectionState;
+                renderDiag();
                 
                 if (peerConnection.iceConnectionState === 'failed') {
                     console.log('ICE connection failed, attempting to restart...');
@@ -808,6 +883,8 @@
             // Handle signaling state
             peerConnection.onsignalingstatechange = () => {
                 console.log('Signaling state:', peerConnection.signalingState);
+                diag.signalingState = peerConnection.signalingState;
+                renderDiag();
             };
         }
 
@@ -1250,63 +1327,21 @@
                 try {
                     console.log('Setting remote description...');
                     
-                    // Mobile-specific SDP modifications for better compatibility
-                    if (isMobile) {
-                        console.log('Applying mobile SDP optimizations');
-                        
-                        // Modify SDP for mobile compatibility
-                        let modifiedSdp = offer.sdp;
-                        
-                        // Force H.264 baseline profile for mobile
-                        modifiedSdp = modifiedSdp.replace(
-                            /a=rtpmap:\d+ H264\/\d+/g,
-                            (match) => {
-                                return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
-                            }
-                        );
-                        
-                        // Add mobile-specific codec preferences
-                        modifiedSdp = modifiedSdp.replace(
-                            /m=video \d+ RTP\/SAVPF/g,
-                            'm=video $1 RTP/SAVPF'
-                        );
-                        
-                        // Set lower bitrate for mobile
-                        modifiedSdp = modifiedSdp.replace(
-                            /a=fmtp:\d+ level-asymmetry-allowed=1;packetization-mode=1/g,
-                            '$&;max-fr=30;max-fs=3600'
-                        );
-                        
-                        offer.sdp = modifiedSdp;
-                        console.log('SDP modified for mobile compatibility');
-                    }
+                    // Remove H.264-forcing; rely on server VP8-first preference for Android compatibility
                     
                     await peerConnection.setRemoteDescription(offer);
                     console.log('Creating answer...');
                     
                     // Create answer with better options and mobile support
                     const answerOptions = {
-                        offerToReceiveAudio: false,
+                        // Request audio so viewer can receive broadcaster's system audio
+                        offerToReceiveAudio: true,
                         offerToReceiveVideo: true
                     };
                     
                     const answer = await peerConnection.createAnswer(answerOptions);
                     
-                    // Mobile-specific answer modifications
-                    if (isMobile) {
-                        let modifiedAnswerSdp = answer.sdp;
-                        
-                        // Ensure mobile-compatible codec settings
-                        modifiedAnswerSdp = modifiedAnswerSdp.replace(
-                            /a=rtpmap:\d+ H264\/\d+/g,
-                            (match) => {
-                                return match + '\r\na=fmtp:' + match.split(':')[1].split(' ')[0] + ' profile-level-id=42e01e;level-asymmetry-allowed=1;packetization-mode=1';
-                            }
-                        );
-                        
-                        answer.sdp = modifiedAnswerSdp;
-                        console.log('Answer SDP modified for mobile compatibility');
-                    }
+                    // Do not force H.264 in the answer; honor server VP8-first ordering
                     
                     await peerConnection.setLocalDescription(answer);
                     console.log('Answer created, sending to broadcaster');
