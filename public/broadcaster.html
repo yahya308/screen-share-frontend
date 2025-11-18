@@ -415,7 +415,8 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const SIGNALING_SERVER = 'http://88.198.242.187:3001';
+        const socket = io(SIGNALING_SERVER);
         const shareButton = document.getElementById('shareButton');
         const stopButton = document.getElementById('stopButton');
         const localVideo = document.getElementById('localVideo');

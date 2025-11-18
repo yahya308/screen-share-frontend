@@ -441,7 +441,8 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         console.log('Viewer page loaded');
-        const socket = io();
+        const SIGNALING_SERVER = 'http://88.198.242.187:3001';
+        const socket = io(SIGNALING_SERVER);
         console.log('Socket.IO connected');
         
         const remoteVideo = document.getElementById('remoteVideo');
