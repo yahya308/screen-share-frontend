@@ -510,7 +510,7 @@
         let configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 10 };
         async function loadIceConfig() {
             try {
-                const res = await fetch('/ice-config', { cache: 'no-store' });
+                const res = await fetch('/api/ice-config', { cache: 'no-store' });
                 if (!res.ok) throw new Error('ICE config fetch failed');
                 const data = await res.json();
                 if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
