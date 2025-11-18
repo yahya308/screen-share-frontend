@@ -441,7 +441,7 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         console.log('Viewer page loaded');
-        const SIGNALING_SERVER = 'https://88.198.242.187:3001';
+        const SIGNALING_SERVER = 'https://88.198.242.187';
         const socket = io(SIGNALING_SERVER, { transports: ['polling', 'websocket'], secure: true, rejectUnauthorized: false });
         console.log('Socket.IO connected');
         
