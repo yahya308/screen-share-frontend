@@ -438,11 +438,11 @@
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         console.log('Viewer page loaded');
-        const SIGNALING_SERVER = 'http://88.198.242.187:3001';
-        const socket = io(SIGNALING_SERVER);
+        const SIGNALING_SERVER = 'https://88.198.242.187:3001';
+        const socket = io(SIGNALING_SERVER, { transports: ['polling', 'websocket'], secure: true, rejectUnauthorized: false });
         console.log('Socket.IO connected');
         
         const remoteVideo = document.getElementById('remoteVideo');
