@@ -415,8 +415,8 @@
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const SIGNALING_SERVER = 'https://88.198.242.187';
-        const socket = io(SIGNALING_SERVER, { transports: ['polling', 'websocket'], secure: true, rejectUnauthorized: false });
+        const SIGNALING_SERVER = 'https://opponent-extensive-glenn-crossing.trycloudflare.com';
+        const socket = io(SIGNALING_SERVER, { transports: ['polling', 'websocket'] });
         const shareButton = document.getElementById('shareButton');
         const stopButton = document.getElementById('stopButton');
         const localVideo = document.getElementById('localVideo');
