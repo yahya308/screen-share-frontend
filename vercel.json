@@ -2,19 +2,7 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "/frontend/viewer.html"
-    },
-    {
-      "source": "/broadcaster",
-      "destination": "/frontend/broadcaster.html"
-    },
-    {
-      "source": "/viewer",
-      "destination": "/frontend/viewer.html"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/frontend/$1"
+      "destination": "/viewer.html"
     }
   ],
   "cleanUrls": true
