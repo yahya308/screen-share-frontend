@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Broadcaster</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+
+    video {
+      width: 100%;
+      max-width: 800px;
+      background: black;
+      margin-top: 10px;
+    }
+
+    .controls {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    .control-group {
+      margin-bottom: 10px;
+    }
+
+    .control-group label {
+      display: inline-block;
+      width: 120px;
+      font-weight: bold;
+    }
+
+    select,
+    input {
+      padding: 5px;
+      width: 200px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 10px;
+      margin-right: 10px;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    #btnStop {
+      background: #dc3545;
+    }
+
+    #btnStop:disabled {
+      background: #ccc;
+    }
+  </style>
+  <script type="importmap">
+        {
+            "imports": {
+                "socket.io-client": "https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.esm.min.js",
+                "mediasoup-client": "https://esm.sh/mediasoup-client@3.18.1?bundle"
+            }
+        }
+    </script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+</head>
+
+<body>
+  <h1>Broadcaster</h1>
+
+  <div class="controls">
+    <div class="control-group">
+      <label>Resolution:</label>
+      <select id="resSelect">
+        <option value="1080">1080p (1920x1080)</option>
+        <option value="720" selected>720p (1280x720)</option>
+        <option value="480">480p (854x480)</option>
+        <option value="360">360p (640x360)</option>
+        <option value="240">240p (426x240)</option>
+        <option value="144">144p (256x144)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>FPS:</label>
+      <select id="fpsSelect">
+        <option value="60">60 FPS</option>
+        <option value="30" selected>30 FPS</option>
+        <option value="24">24 FPS</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Bitrate (kbps):</label>
+      <input type="number" id="bitrateInput" value="2500" min="1000" max="20000" step="500">
+      <small>(1000 - 20000)</small>
+    </div>
+
+    <button id="btnStart">Start Screen Share</button>
+    <button id="btnStop" disabled>Stop Share</button>
+
+    <div style="margin-top: 10px;">
+      <button id="btnToggleMic" disabled>Toggle Mic (Off)</button>
+      <button id="btnToggleAudio" disabled>Toggle System Audio (Off)</button>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <label>Mic Volume:</label>
+      <progress id="micVolume" value="0" max="100" style="width: 200px;"></progress>
+    </div>
+  </div>
+
+  <p id="status">Status: Disconnected</p>
+  <video id="localVideo" autoplay playsinline muted></video>
+
+  <script type="module" src="broadcaster.js"></script>
+</body>
+
+</html>

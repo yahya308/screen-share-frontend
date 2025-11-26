@@ -183,6 +183,12 @@ io.on('connection', (socket) => {
     isSamsung: isSamsung
   });
 
+  // If a broadcaster is already active, inform this newly connected client
+  // so that late viewers can immediately emit their 'viewer' event.
+  if (broadcasterCount > 0) {
+    socket.emit('broadcaster');
+  }
+
   // Handle broadcaster joining
   socket.on('broadcaster', () => {
     try {

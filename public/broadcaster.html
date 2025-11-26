@@ -415,8 +415,14 @@
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const SIGNALING_SERVER = 'https://opponent-extensive-glenn-crossing.trycloudflare.com';
-        const socket = io(SIGNALING_SERVER, { transports: ['polling', 'websocket'] });
+        // Signaling sunucusu yerel testte otomatik olarak origin'i kullanır.
+        // Uzak ortam için .env veya build sistemiyle değiştirebilirsin.
+        // Signaling sunucusu seçimi:
+        // 1) Varsayılan: window.location.origin (aynı domain barındırma)
+        // 2) Override: Sayfada daha önce tanımlanmış window.SIGNALING_SERVER_OVERRIDE (örn. <script>window.SIGNALING_SERVER_OVERRIDE='https://signal.example.com'</script>)
+        // 3) Hardcoded fallback (doldurmak istersen):
+        const SIGNALING_SERVER = window.SIGNALING_SERVER_OVERRIDE || window.location.origin;
+        const socket = io(SIGNALING_SERVER, { path: '/socket.io/', transports: ['polling', 'websocket'] });
         const shareButton = document.getElementById('shareButton');
         const stopButton = document.getElementById('stopButton');
         const localVideo = document.getElementById('localVideo');
@@ -511,7 +517,12 @@
         let configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 10 };
         async function loadIceConfig() {
             try {
-                const res = await fetch('/api/ice-config', { cache: 'no-store' });
+                // Önce Vercel tarzı /api/ice-config dene; 404 ise lokal /ice-config'e düş.
+                let res = await fetch('/api/ice-config', { cache: 'no-store' });
+                if (!res.ok) {
+                    console.warn('/api/ice-config 404 veya başarısız, /ice-config deneniyor');
+                    res = await fetch('/ice-config', { cache: 'no-store' });
+                }
                 if (!res.ok) throw new Error('ICE config fetch failed');
                 const data = await res.json();
                 if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {

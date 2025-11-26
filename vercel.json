@@ -2,29 +2,27 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "server.js",
-      "use": "@vercel/node"
+      "src": "frontend/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
+      "src": "/",
+      "dest": "/frontend/viewer.html"
     },
     {
-      "src": "/socket.io/(.*)",
-      "dest": "/server.js"
+      "src": "/broadcaster",
+      "dest": "/frontend/broadcaster.html"
+    },
+    {
+      "src": "/viewer",
+      "dest": "/frontend/viewer.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/server.js"
+      "dest": "/frontend/$1"
     }
   ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+  "cleanUrls": true
 }
