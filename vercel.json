@@ -6,22 +6,22 @@
       "use": "@vercel/static"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/",
-      "dest": "/frontend/viewer.html"
+      "source": "/",
+      "destination": "/frontend/viewer.html"
     },
     {
-      "src": "/broadcaster",
-      "dest": "/frontend/broadcaster.html"
+      "source": "/broadcaster",
+      "destination": "/frontend/broadcaster.html"
     },
     {
-      "src": "/viewer",
-      "dest": "/frontend/viewer.html"
+      "source": "/viewer",
+      "destination": "/frontend/viewer.html"
     },
     {
-      "src": "/(.*)",
-      "dest": "/frontend/$1"
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
     }
   ],
   "cleanUrls": true
