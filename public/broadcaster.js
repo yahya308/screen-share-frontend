@@ -7,6 +7,11 @@ const btnToggleMic = document.getElementById('btnToggleMic');
 const btnToggleAudio = document.getElementById('btnToggleAudio');
 const status = document.getElementById('status');
 const localVideo = document.getElementById('localVideo');
+const viewerCountSpan = document.getElementById('viewerCount');
+
+socket.on('viewer-count', (count) => {
+    if (viewerCountSpan) viewerCountSpan.innerText = count;
+});
 
 // UI Elements
 const resSelect = document.getElementById('resSelect');

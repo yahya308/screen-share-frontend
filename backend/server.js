@@ -51,6 +51,12 @@ const producers = new Map(); // Store all producers: producer.id -> producer
 let consumer;
 // We need to store transports to find them later
 const transports = [];
+const viewers = new Set();
+
+function broadcastViewerCount() {
+    io.emit('viewer-count', viewers.size);
+    console.log('Viewer count updated:', viewers.size);
+}
 
 // --- Mediasoup Worker & Router ---
 async function startMediasoup() {
@@ -74,6 +80,9 @@ io.on('connection', async (socket) => {
     socket.emit('connection-success', {
         socketId: socket.id,
     });
+
+    // Send current viewer count
+    socket.emit('viewer-count', viewers.size);
 
     // 1. Get Router RTP Capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
@@ -199,6 +208,12 @@ io.on('connection', async (socket) => {
             callback({ params });
             await consumer.resume();
 
+            // Add to viewers list if not already present
+            if (!viewers.has(socket.id)) {
+                viewers.add(socket.id);
+                broadcastViewerCount();
+            }
+
         } catch (error) {
             console.error('Consume error:', error);
             callback({ params: { error: error } });
@@ -232,6 +247,12 @@ io.on('connection', async (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
+
+        // Remove from viewers list
+        if (viewers.has(socket.id)) {
+            viewers.delete(socket.id);
+            broadcastViewerCount();
+        }
 
         // 1. Find and close all transports associated with this socket
         const userTransports = transports.filter(t => t.socketId === socket.id);
