@@ -11,14 +11,6 @@ const consumers = new Map(); // Store consumers: consumer.id -> consumer
 
 btnConsume.addEventListener('click', joinStream);
 
-// Viewer Count Handler
-const viewerCountEl = document.getElementById('viewerCount');
-socket.on('viewer-count', (count) => {
-    if (viewerCountEl) {
-        viewerCountEl.innerText = count;
-    }
-});
-
 async function joinStream() {
     btnConsume.disabled = true;
 

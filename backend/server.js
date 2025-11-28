@@ -75,10 +75,6 @@ io.on('connection', async (socket) => {
         socketId: socket.id,
     });
 
-    // Emit updated viewer count to all clients
-    const count = io.engine.clientsCount;
-    io.emit('viewer-count', count);
-
     // 1. Get Router RTP Capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
         callback(router.rtpCapabilities);
@@ -236,13 +232,6 @@ io.on('connection', async (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
-
-        // Emit updated viewer count (after a short delay to ensure count is updated)
-        // io.engine.clientsCount might not update immediately inside the disconnect handler
-        setTimeout(() => {
-            const count = io.engine.clientsCount;
-            io.emit('viewer-count', count);
-        }, 100);
 
         // 1. Find and close all transports associated with this socket
         const userTransports = transports.filter(t => t.socketId === socket.id);
