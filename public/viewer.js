@@ -4,11 +4,6 @@ const socket = io("https://yahya-sfu.duckdns.org:3000");
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');
-const viewerCountSpan = document.getElementById('viewerCount');
-
-socket.on('viewer-count', (count) => {
-    if (viewerCountSpan) viewerCountSpan.innerText = count;
-});
 
 let device;
 let consumerTransport;
