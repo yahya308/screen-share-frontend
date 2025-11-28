@@ -7,6 +7,7 @@ const btnToggleMic = document.getElementById('btnToggleMic');
 const btnToggleAudio = document.getElementById('btnToggleAudio');
 const status = document.getElementById('status');
 const localVideo = document.getElementById('localVideo');
+const viewerCountEl = document.getElementById('viewerCount'); // Viewer Count Element
 
 // UI Elements
 const resSelect = document.getElementById('resSelect');
@@ -18,6 +19,13 @@ let producerTransport;
 let videoProducer;
 let micProducer;
 let systemAudioProducer;
+
+// Viewer Count Listener
+socket.on('viewer-count-update', (count) => {
+    if (viewerCountEl) {
+        viewerCountEl.innerText = count;
+    }
+});
 
 btnStart.addEventListener('click', startShare);
 btnStop.addEventListener('click', () => stopShare("Stop Button Clicked"));

@@ -4,10 +4,24 @@ const socket = io("https://yahya-sfu.duckdns.org:3000");
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');
+const viewerCountEl = document.getElementById('viewerCount'); // Viewer Count Element
 
 let device;
 let consumerTransport;
 const consumers = new Map(); // Store consumers: consumer.id -> consumer
+
+// Join as viewer immediately upon connection
+socket.on('connect', () => {
+    console.log("Connected to socket, joining as viewer...");
+    socket.emit('join-as-viewer');
+});
+
+// Viewer Count Listener
+socket.on('viewer-count-update', (count) => {
+    if (viewerCountEl) {
+        viewerCountEl.innerText = count;
+    }
+});
 
 btnConsume.addEventListener('click', joinStream);
 
