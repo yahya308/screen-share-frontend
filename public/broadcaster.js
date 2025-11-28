@@ -24,6 +24,14 @@ btnStop.addEventListener('click', () => stopShare("Stop Button Clicked"));
 btnToggleMic.addEventListener('click', toggleMic);
 btnToggleAudio.addEventListener('click', toggleSystemAudio);
 
+// Viewer Count Handler
+const viewerCountEl = document.getElementById('viewerCount');
+socket.on('viewer-count', (count) => {
+    if (viewerCountEl) {
+        viewerCountEl.innerText = count;
+    }
+});
+
 async function startShare() {
     btnStart.disabled = true;
     btnStop.disabled = false;
