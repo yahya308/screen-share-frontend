@@ -70,6 +70,7 @@ startMediasoup();
 // --- Socket.io Handling ---
 io.on('connection', async (socket) => {
     console.log('Client connected:', socket.id);
+    io.emit('viewer-count-update', io.engine.clientsCount);
 
     socket.emit('connection-success', {
         socketId: socket.id,
@@ -232,6 +233,7 @@ io.on('connection', async (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
+        io.emit('viewer-count-update', io.engine.clientsCount);
 
         // 1. Find and close all transports associated with this socket
         const userTransports = transports.filter(t => t.socketId === socket.id);

@@ -232,3 +232,11 @@ function stopShare(reason = "Unknown") {
 
     status.innerText = 'Status: Disconnected';
 }
+
+// --- Viewer Count Update ---
+socket.on('viewer-count-update', (count) => {
+    const countSpan = document.getElementById('count-span');
+    if (countSpan) {
+        countSpan.innerText = count;
+    }
+});
