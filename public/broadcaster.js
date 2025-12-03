@@ -110,11 +110,33 @@ async function startShare() {
 
                 localVideo.srcObject = stream;
 
-                // Video Track
+                // Video Track with ⭐ SIMULCAST (3 quality layers)
                 const videoTrack = stream.getVideoTracks()[0];
                 videoProducer = await producerTransport.produce({
                     track: videoTrack,
-                    encodings: [{ maxBitrate: bitrate }]
+                    encodings: [
+                        {
+                            rid: 'r0',
+                            scaleResolutionDownBy: 4,  // 360p layer
+                            maxBitrate: 300000,
+                            scalabilityMode: 'L1T3'
+                        },
+                        {
+                            rid: 'r1',
+                            scaleResolutionDownBy: 2,  // 720p layer
+                            maxBitrate: 1000000,
+                            scalabilityMode: 'L1T3'
+                        },
+                        {
+                            rid: 'r2',
+                            scaleResolutionDownBy: 1,  // Original quality (1080p)
+                            maxBitrate: bitrate,
+                            scalabilityMode: 'L1T3'
+                        }
+                    ],
+                    codecOptions: {
+                        videoGoogleStartBitrate: 1000
+                    }
                 });
 
                 videoTrack.onended = () => stopShare("Video Track Ended (Browser UI)");
