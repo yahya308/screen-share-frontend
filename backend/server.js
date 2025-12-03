@@ -52,6 +52,9 @@ let consumer;
 // We need to store transports to find them later
 const transports = [];
 
+// ⭐ Track broadcasters to exclude them from viewer count
+const broadcasters = new Set(); // socketId
+
 // --- Mediasoup Worker & Router ---
 async function startMediasoup() {
     worker = await mediasoup.createWorker(config.mediasoup.worker);
@@ -76,7 +79,10 @@ io.on('connection', async (socket) => {
     });
 
     // Viewer Count Helper Functions
-    const getViewerCount = () => io.sockets.sockets.size;
+    const getViewerCount = () => {
+        // ⭐ Total connections minus broadcasters = actual viewers
+        return io.sockets.sockets.size - broadcasters.size;
+    };
 
     const emitViewerCount = () => {
         const count = getViewerCount();
@@ -150,6 +156,11 @@ io.on('connection', async (socket) => {
             });
 
             producers.set(producer.id, producer);
+
+            // ⭐ Mark this socket as a broadcaster
+            broadcasters.add(socket.id);
+            console.log(`👤 Broadcaster added: ${socket.id}. Total: ${broadcasters.size}`);
+            emitViewerCount(); // Update viewer count
 
             producer.on('transportclose', () => {
                 console.log('transport for this producer closed');
