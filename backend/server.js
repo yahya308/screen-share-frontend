@@ -75,10 +75,17 @@ io.on('connection', async (socket) => {
         socketId: socket.id,
     });
 
+    // Viewer Count Helper Functions
+    const getViewerCount = () => io.sockets.sockets.size;
+
+    const emitViewerCount = () => {
+        const count = getViewerCount();
+        console.log(`Broadcasting viewer count: ${count}`);
+        io.emit('viewer-count-update', count);
+    };
+
     // Viewer Count: Broadcast current count to all clients on new connection
-    const viewerCount = io.engine.clientsCount;
-    console.log(`Client connected. Total viewers: ${viewerCount}`);
-    io.emit('viewer-count-update', viewerCount);
+    emitViewerCount();
 
     // 1. Get Router RTP Capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
@@ -224,7 +231,7 @@ io.on('connection', async (socket) => {
 
     // Viewer Count: Handle request for current viewer count
     socket.on('get-viewer-count', () => {
-        const viewerCount = io.engine.clientsCount;
+        const viewerCount = io.sockets.sockets.size;
         console.log(`Viewer count requested by ${socket.id}. Sending: ${viewerCount}`);
         socket.emit('viewer-count-response', viewerCount);
     });
@@ -268,7 +275,7 @@ io.on('connection', async (socket) => {
         }
 
         // Viewer Count: Broadcast updated count after disconnect
-        const viewerCount = io.engine.clientsCount;
+        const viewerCount = io.sockets.sockets.size;
         console.log(`Client disconnected. Remaining viewers: ${viewerCount}`);
         io.emit('viewer-count-update', viewerCount);
     });

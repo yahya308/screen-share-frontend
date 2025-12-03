@@ -4,7 +4,21 @@ const socket = io("https://yahya-sfu.duckdns.org:3000");
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');
-const viewerCountDisplay = document.getElementById('viewer-count-display');
+
+// Viewer Count Logic - Safe DOM Element Check
+const updateViewerCountUI = (count) => {
+    const el = document.getElementById('viewer-count-display');
+    // Fallback: Try alternative ID if primary not found
+    const targetEl = el || document.getElementById('viewerCount');
+
+    if (targetEl) {
+        targetEl.innerText = count;
+        targetEl.textContent = count; // Fallback for older browsers
+        console.log("✅ UI Updated with count:", count);
+    } else {
+        console.warn("⚠️ Viewer Count Element NOT FOUND in DOM. Check HTML IDs.");
+    }
+};
 
 let device;
 let consumerTransport;
@@ -19,16 +33,10 @@ socket.on('connect', () => {
 });
 
 // Viewer Count: Listen for viewer count updates (broadcast to all)
-socket.on('viewer-count-update', (count) => {
-    console.log('Viewer Count Updated:', count);
-    viewerCountDisplay.textContent = count;
-});
+socket.on('viewer-count-update', (count) => updateViewerCountUI(count));
 
 // Viewer Count: Listen for viewer count response (direct response)
-socket.on('viewer-count-response', (count) => {
-    console.log('Viewer Count Response:', count);
-    viewerCountDisplay.textContent = count;
-});
+socket.on('viewer-count-response', (count) => updateViewerCountUI(count));
 
 async function joinStream() {
     btnConsume.disabled = true;
