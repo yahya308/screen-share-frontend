@@ -4,12 +4,31 @@ const socket = io("https://yahya-sfu.duckdns.org:3000");
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');
+const viewerCountDisplay = document.getElementById('viewer-count-display');
 
 let device;
 let consumerTransport;
 const consumers = new Map(); // Store consumers: consumer.id -> consumer
 
 btnConsume.addEventListener('click', joinStream);
+
+// Viewer Count: Request current count on socket connect
+socket.on('connect', () => {
+    console.log('Socket connected, requesting viewer count');
+    socket.emit('get-viewer-count');
+});
+
+// Viewer Count: Listen for viewer count updates (broadcast to all)
+socket.on('viewer-count-update', (count) => {
+    console.log('Viewer Count Updated:', count);
+    viewerCountDisplay.textContent = count;
+});
+
+// Viewer Count: Listen for viewer count response (direct response)
+socket.on('viewer-count-response', (count) => {
+    console.log('Viewer Count Response:', count);
+    viewerCountDisplay.textContent = count;
+});
 
 async function joinStream() {
     btnConsume.disabled = true;

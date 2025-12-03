@@ -75,6 +75,11 @@ io.on('connection', async (socket) => {
         socketId: socket.id,
     });
 
+    // Viewer Count: Broadcast current count to all clients on new connection
+    const viewerCount = io.engine.clientsCount;
+    console.log(`Client connected. Total viewers: ${viewerCount}`);
+    io.emit('viewer-count-update', viewerCount);
+
     // 1. Get Router RTP Capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
         callback(router.rtpCapabilities);
@@ -217,6 +222,13 @@ io.on('connection', async (socket) => {
         callback(Array.from(producers.keys()));
     });
 
+    // Viewer Count: Handle request for current viewer count
+    socket.on('get-viewer-count', () => {
+        const viewerCount = io.engine.clientsCount;
+        console.log(`Viewer count requested by ${socket.id}. Sending: ${viewerCount}`);
+        socket.emit('viewer-count-response', viewerCount);
+    });
+
     socket.on('producer-closing', ({ producerId }) => {
         const producer = producers.get(producerId);
         if (producer) {
@@ -254,6 +266,11 @@ io.on('connection', async (socket) => {
             // But since we closed the transport, the producer should have emitted 'transportclose'
             // and removed itself from the map via the listener we added in 'transport-produce'.
         }
+
+        // Viewer Count: Broadcast updated count after disconnect
+        const viewerCount = io.engine.clientsCount;
+        console.log(`Client disconnected. Remaining viewers: ${viewerCount}`);
+        io.emit('viewer-count-update', viewerCount);
     });
 });
 

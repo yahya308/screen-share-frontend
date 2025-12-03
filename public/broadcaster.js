@@ -7,6 +7,7 @@ const btnToggleMic = document.getElementById('btnToggleMic');
 const btnToggleAudio = document.getElementById('btnToggleAudio');
 const status = document.getElementById('status');
 const localVideo = document.getElementById('localVideo');
+const viewerCountDisplay = document.getElementById('viewer-count-display');
 
 // UI Elements
 const resSelect = document.getElementById('resSelect');
@@ -23,6 +24,24 @@ btnStart.addEventListener('click', startShare);
 btnStop.addEventListener('click', () => stopShare("Stop Button Clicked"));
 btnToggleMic.addEventListener('click', toggleMic);
 btnToggleAudio.addEventListener('click', toggleSystemAudio);
+
+// Viewer Count: Request current count on socket connect
+socket.on('connect', () => {
+    console.log('Socket connected, requesting viewer count');
+    socket.emit('get-viewer-count');
+});
+
+// Viewer Count: Listen for viewer count updates (broadcast to all)
+socket.on('viewer-count-update', (count) => {
+    console.log('Viewer Count Updated:', count);
+    viewerCountDisplay.textContent = count;
+});
+
+// Viewer Count: Listen for viewer count response (direct response)
+socket.on('viewer-count-response', (count) => {
+    console.log('Viewer Count Response:', count);
+    viewerCountDisplay.textContent = count;
+});
 
 async function startShare() {
     btnStart.disabled = true;
