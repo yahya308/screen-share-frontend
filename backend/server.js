@@ -285,8 +285,12 @@ io.on('connection', async (socket) => {
             // and removed itself from the map via the listener we added in 'transport-produce'.
         }
 
-        // Viewer Count: Broadcast updated count after disconnect
-        const viewerCount = io.sockets.sockets.size;
+        // Viewer Count: Remove from broadcasters if they were broadcasting
+        broadcasters.delete(socket.id);
+        console.log(`Broadcaster removed: ${socket.id}. Remaining broadcasters: ${broadcasters.size}`);
+
+        // Broadcast updated count after disconnect
+        const viewerCount = io.sockets.sockets.size - broadcasters.size;
         console.log(`Client disconnected. Remaining viewers: ${viewerCount}`);
         io.emit('viewer-count-update', viewerCount);
     });
