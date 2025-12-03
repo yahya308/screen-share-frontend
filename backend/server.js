@@ -44,41 +44,25 @@ const io = new Server(webServer, {
 });
 
 // --- Global Variables ---
-const os = require('os');
-const numWorkers = os.cpus().length;  // ⭐ Use all CPU cores (Hetzner 4GB = 2 cores)
-const workers = [];
-let nextWorkerIndex = 0;
-
+let worker;
+let router;
 // let producer; // REMOVED: Single producer is not enough
 const producers = new Map(); // Store all producers: producer.id -> producer
 let consumer;
 // We need to store transports to find them later
 const transports = [];
 
-// --- Mediasoup Multi-Worker Setup ---
+// --- Mediasoup Worker & Router ---
 async function startMediasoup() {
-    console.log(`⭐ Creating ${numWorkers} Mediasoup workers (1 per CPU core)...`);
+    worker = await mediasoup.createWorker(config.mediasoup.worker);
 
-    for (let i = 0; i < numWorkers; i++) {
-        const worker = await mediasoup.createWorker(config.mediasoup.worker);
+    worker.on('died', () => {
+        console.error('mediasoup worker died, exiting in 2 seconds... [pid:%d]', worker.pid);
+        setTimeout(() => process.exit(1), 2000);
+    });
 
-        worker.on('died', () => {
-            console.error('⚠️ Worker died [pid:%d], exiting in 2 seconds...', worker.pid);
-            setTimeout(() => process.exit(1), 2000);
-        });
-
-        workers.push(worker);
-        console.log(`✅ Worker ${i + 1}/${numWorkers} created [pid:${worker.pid}]`);
-    }
-
-    console.log(`🚀 All ${numWorkers} workers ready!`);
-}
-
-// Round-robin worker selection
-function getNextWorker() {
-    const worker = workers[nextWorkerIndex];
-    nextWorkerIndex = (nextWorkerIndex + 1) % workers.length;
-    return worker;
+    router = await worker.createRouter({ mediaCodecs: config.mediasoup.router.mediaCodecs });
+    console.log('✅ Mediasoup Router created');
 }
 
 startMediasoup();
@@ -90,11 +74,6 @@ io.on('connection', async (socket) => {
     socket.emit('connection-success', {
         socketId: socket.id,
     });
-
-    // ⭐ Multi-Worker: Create router from next available worker
-    const worker = getNextWorker();
-    const router = await worker.createRouter({ mediaCodecs: config.mediasoup.router.mediaCodecs });
-    console.log(`📡 Router created for ${socket.id} using worker ${workers.indexOf(worker) + 1}`);
 
     // Viewer Count Helper Functions
     const getViewerCount = () => io.sockets.sockets.size;
