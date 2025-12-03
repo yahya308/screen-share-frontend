@@ -71,22 +71,6 @@ startMediasoup();
 io.on('connection', async (socket) => {
     console.log('Client connected:', socket.id);
 
-    // Helper function to emit viewer count
-    const emitViewerCount = () => {
-        const count = io.engine.clientsCount;
-        console.log("SERVER: İzleyici sayısı gönderiliyor:", count);
-        io.emit('viewer-count-update', count);
-    };
-
-    // Emit on connection
-    emitViewerCount();
-
-    // Handle manual request
-    socket.on('request-viewer-count', () => {
-        console.log(`SERVER: Client ${socket.id} requested viewer count`);
-        emitViewerCount();
-    });
-
     socket.emit('connection-success', {
         socketId: socket.id,
     });
@@ -248,7 +232,6 @@ io.on('connection', async (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
-        emitViewerCount();
 
         // 1. Find and close all transports associated with this socket
         const userTransports = transports.filter(t => t.socketId === socket.id);

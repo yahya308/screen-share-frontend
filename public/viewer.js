@@ -158,17 +158,3 @@ socket.on('producer-closed', ({ remoteProducerId }) => {
         console.log('Removed consumer and track for producer:', remoteProducerId);
     }
 });
-
-// --- Viewer Count Update ---
-socket.on('viewer-count-update', (count) => {
-    console.log("CLIENT: Yeni izleyici sayısı geldi:", count);
-    const countSpan = document.getElementById('count-span');
-    if (countSpan) {
-        countSpan.innerText = count;
-    }
-});
-
-socket.on('connect', () => {
-    console.log("Connected to server, requesting viewer count...");
-    socket.emit('request-viewer-count');
-});

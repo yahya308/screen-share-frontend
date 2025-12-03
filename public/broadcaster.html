@@ -45,22 +45,23 @@
   </style>
   <script type="importmap">
         {
+            "imports": {
+                "socket.io-client": "https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.esm.min.js",
+                "mediasoup-client": "https://esm.sh/mediasoup-client@3.18.1?bundle"
+            }
+        }
+    </script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center py-10 px-4 font-sans">
+
+  <header class="mb-8 text-center">
+    <h1
       class="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-purple-500 tracking-tight">
       VELOSTREAM
     </h1>
     <p class="text-slate-400 mt-2 text-lg">Yüksek Performanslı Ekran Paylaşımı</p>
-
-    <!-- Viewer Count Badge -->
-    <div id="viewer-count-display"
-      class="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-slate-800/80 rounded-full border border-slate-700 text-brand-400 font-semibold shadow-lg backdrop-blur-sm transition-all">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-        <path fill-rule="evenodd"
-          d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-          clip-rule="evenodd" />
-      </svg>
-      <span>İzleyici: <span id="count-span">0</span></span>
-    </div>
   </header>
 
   <main
@@ -182,6 +183,6 @@
   </footer>
 
   <script type="module" src="broadcaster.js"></script>
-  </body>
+</body>
 
 </html>
