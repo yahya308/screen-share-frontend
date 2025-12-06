@@ -311,6 +311,15 @@ async function consumeProducer(producerId) {
 
         console.log(`📺 Consumed ${params.kind} track`);
 
+        // Save video consumer for quality control
+        if (params.kind === 'video') {
+            videoConsumer = consumer;
+            // Apply current quality setting
+            if (currentQuality !== 'auto') {
+                await setConsumerQuality(consumer, currentQuality);
+            }
+        }
+
         if (remoteVideo.srcObject) {
             remoteVideo.srcObject.addTrack(consumer.track);
         } else {
