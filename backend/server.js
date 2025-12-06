@@ -359,8 +359,11 @@ io.on('connection', (socket) => {
                 paused: true
             });
 
-            roomState.consumers.set(socket.id, consumer);
+            // Store consumer by consumer.id (not socket.id) to support multiple consumers per viewer
+            roomState.consumers.set(consumer.id, { consumer, socketId: socket.id });
             workerManager.incrementConsumers(roomState.workerIndex);
+
+            console.log(`📺 Consumer created: ${consumer.kind} for ${socket.id}`);
 
             callback({
                 params: {
@@ -377,13 +380,14 @@ io.on('connection', (socket) => {
     });
 
     // Resume consumer
-    socket.on('resume', async () => {
+    socket.on('resume', async ({ consumerId }) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData || !socketData.roomState) return;
 
-        const consumer = socketData.roomState.consumers.get(socket.id);
-        if (consumer) {
-            await consumer.resume();
+        const consumerData = socketData.roomState.consumers.get(consumerId);
+        if (consumerData && consumerData.consumer) {
+            await consumerData.consumer.resume();
+            console.log(`▶️ Consumer resumed: ${consumerId}`);
         }
     });
 

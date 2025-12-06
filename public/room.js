@@ -306,6 +306,8 @@ async function consumeProducer(producerId) {
 
         consumers.set(consumer.id, consumer);
 
+        console.log(`📺 Consumed ${params.kind} track`);
+
         if (remoteVideo.srcObject) {
             remoteVideo.srcObject.addTrack(consumer.track);
         } else {
@@ -316,7 +318,8 @@ async function consumeProducer(producerId) {
         waitingOverlay.classList.add('hidden');
         pausedOverlay.classList.add('hidden');
 
-        socket.emit('resume');
+        // Resume consumer with the consumer ID
+        socket.emit('resume', { consumerId: consumer.id });
 
         remoteVideo.play().catch(e => console.error('Play error:', e));
     });

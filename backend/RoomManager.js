@@ -136,19 +136,21 @@ class RoomManager {
         // Clean up transports and consumers for this socket
         const roomState = this.rooms.get(roomId);
         if (roomState) {
-            // Close consumer
-            const consumer = roomState.consumers.get(socketId);
-            if (consumer) {
-                consumer.close();
-                roomState.consumers.delete(socketId);
-                this.workerManager.decrementConsumers(roomState.workerIndex);
+            // Close all consumers belonging to this socket
+            for (const [consumerId, consumerData] of roomState.consumers) {
+                if (consumerData.socketId === socketId) {
+                    consumerData.consumer.close();
+                    roomState.consumers.delete(consumerId);
+                    this.workerManager.decrementConsumers(roomState.workerIndex);
+                }
             }
 
-            // Close transport
-            const transport = roomState.transports.get(socketId);
-            if (transport) {
-                transport.close();
-                roomState.transports.delete(socketId);
+            // Close transports
+            for (const [key, transport] of roomState.transports) {
+                if (key.startsWith(socketId)) {
+                    transport.close();
+                    roomState.transports.delete(key);
+                }
             }
         }
 
