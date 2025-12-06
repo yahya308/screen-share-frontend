@@ -1,6 +1,6 @@
 import { Device } from "mediasoup-client";
 
-const socket = io("https://yahya-oracle.duckdns.org"); // Connect to Oracle Cloud Backend
+const socket = io("https://yahya-oracle.duckdns.org");
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
 const btnToggleMic = document.getElementById('btnToggleMic');
@@ -8,7 +8,6 @@ const btnToggleAudio = document.getElementById('btnToggleAudio');
 const status = document.getElementById('status');
 const localVideo = document.getElementById('localVideo');
 
-// Viewer Count Logic - Safe DOM Element Check
 const updateViewerCountUI = (count) => {
     const el = document.getElementById('viewer-count-display');
     const targetEl = el || document.getElementById('viewerCount');
@@ -18,7 +17,6 @@ const updateViewerCountUI = (count) => {
     }
 };
 
-// UI Elements
 const resSelect = document.getElementById('resSelect');
 const fpsSelect = document.getElementById('fpsSelect');
 const bitrateInput = document.getElementById('bitrateInput');
@@ -29,41 +27,11 @@ let videoProducer;
 let micProducer;
 let systemAudioProducer;
 
-// Simulcast encoding configuration based on source resolution
-function generateSimulcastEncodings(sourceHeight, maxBitrate) {
-    const qualityLevels = [
-        { height: 1080, bitrate: 2500000, label: '1080p' },
-        { height: 720, bitrate: 1500000, label: '720p' },
-        { height: 480, bitrate: 800000, label: '480p' },
-        { height: 360, bitrate: 400000, label: '360p' }
-    ];
-
-    // Filter levels that are <= source resolution
-    const availableLevels = qualityLevels.filter(q => q.height <= sourceHeight);
-
-    // Take up to 3 layers (simulcast standard)
-    const selectedLevels = availableLevels.slice(0, 3);
-
-    // Generate encodings from lowest to highest
-    const encodings = selectedLevels.reverse().map((level, index) => {
-        const scaleDown = sourceHeight / level.height;
-        return {
-            rid: `r${index}`,
-            maxBitrate: Math.min(level.bitrate, maxBitrate),
-            scaleResolutionDownBy: scaleDown
-        };
-    });
-
-    console.log('Simulcast encodings generated:', encodings);
-    return encodings;
-}
-
 btnStart.addEventListener('click', startShare);
 btnStop.addEventListener('click', () => stopShare("Stop Button Clicked"));
 btnToggleMic.addEventListener('click', toggleMic);
 btnToggleAudio.addEventListener('click', toggleSystemAudio);
 
-// Viewer Count: Request current count on socket connect
 socket.on('connect', () => {
     console.log('Socket connected, requesting viewer count');
     socket.emit('get-viewer-count');
@@ -129,28 +97,24 @@ async function startShare() {
                 localVideo.srcObject = stream;
 
                 const videoTrack = stream.getVideoTracks()[0];
-                const simulcastEncodings = generateSimulcastEncodings(height, bitrate);
 
-                // Find VP8 codec for simulcast (VP9 doesn't support simulcast in mediasoup)
-                const vp8Codec = device.rtpCapabilities.codecs.find(
-                    c => c.mimeType.toLowerCase() === 'video/vp8'
-                );
-
+                // Simple single-layer encoding for smooth performance
+                // Quality selector will work via consumer-side layer switching
                 videoProducer = await producerTransport.produce({
                     track: videoTrack,
-                    encodings: simulcastEncodings,
+                    encodings: [
+                        { maxBitrate: bitrate }
+                    ],
                     codecOptions: {
                         videoGoogleStartBitrate: 1000
-                    },
-                    codec: vp8Codec
+                    }
                 });
 
                 // Send stream info to server for viewers
                 socket.emit('broadcaster-settings', {
                     resolution: height,
                     fps: fps,
-                    maxBitrate: bitrate,
-                    layerCount: simulcastEncodings.length
+                    maxBitrate: bitrate
                 });
 
                 videoTrack.onended = () => stopShare("Video Track Ended (Browser UI)");

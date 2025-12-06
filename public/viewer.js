@@ -1,6 +1,6 @@
 import { Device } from "mediasoup-client";
 
-const socket = io("https://yahya-oracle.duckdns.org"); // Connect to Oracle Cloud Backend
+const socket = io("https://yahya-oracle.duckdns.org");
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');
@@ -13,10 +13,6 @@ const btnMute = document.getElementById('btnMute');
 const iconVolumeOn = document.getElementById('iconVolumeOn');
 const iconVolumeOff = document.getElementById('iconVolumeOff');
 const volumeSlider = document.getElementById('volumeSlider');
-const btnQuality = document.getElementById('btnQuality');
-const qualityDropdown = document.getElementById('qualityDropdown');
-const qualityOptions = document.getElementById('qualityOptions');
-const currentQuality = document.getElementById('currentQuality');
 const btnFullscreen = document.getElementById('btnFullscreen');
 const iconFullscreenEnter = document.getElementById('iconFullscreenEnter');
 const iconFullscreenExit = document.getElementById('iconFullscreenExit');
@@ -35,29 +31,12 @@ const updateViewerCountUI = (count) => {
 let device;
 let consumerTransport;
 const consumers = new Map();
-let videoConsumerId = null; // Track video consumer for layer switching
-let broadcasterSettings = null;
-let selectedQuality = 'auto';
 
 btnConsume.addEventListener('click', joinStream);
 
-// Viewer Count: Request current count on socket connect
 socket.on('connect', () => {
     console.log('Socket connected, requesting viewer count');
     socket.emit('get-viewer-count');
-    socket.emit('get-stream-info', (settings) => {
-        if (settings) {
-            broadcasterSettings = settings;
-            setupQualityOptions(settings);
-        }
-    });
-});
-
-// Listen for stream info from broadcaster
-socket.on('stream-info', (settings) => {
-    console.log('📺 Stream info received:', settings);
-    broadcasterSettings = settings;
-    setupQualityOptions(settings);
 });
 
 socket.on('viewer-count-update', (count) => updateViewerCountUI(count));
@@ -66,41 +45,48 @@ socket.on('viewer-count-response', (count) => updateViewerCountUI(count));
 // ==================== VIDEO CONTROLS ====================
 
 // Play/Pause
-btnPlayPause.addEventListener('click', () => {
-    if (remoteVideo.paused) {
-        remoteVideo.play();
-        iconPlay.classList.add('hidden');
-        iconPause.classList.remove('hidden');
-    } else {
-        remoteVideo.pause();
-        iconPlay.classList.remove('hidden');
-        iconPause.classList.add('hidden');
-    }
-});
+if (btnPlayPause) {
+    btnPlayPause.addEventListener('click', () => {
+        if (remoteVideo.paused) {
+            remoteVideo.play();
+            iconPlay.classList.add('hidden');
+            iconPause.classList.remove('hidden');
+        } else {
+            remoteVideo.pause();
+            iconPlay.classList.remove('hidden');
+            iconPause.classList.add('hidden');
+        }
+    });
+}
 
 remoteVideo.addEventListener('play', () => {
-    iconPlay.classList.add('hidden');
-    iconPause.classList.remove('hidden');
+    if (iconPlay) iconPlay.classList.add('hidden');
+    if (iconPause) iconPause.classList.remove('hidden');
 });
 
 remoteVideo.addEventListener('pause', () => {
-    iconPlay.classList.remove('hidden');
-    iconPause.classList.add('hidden');
+    if (iconPlay) iconPlay.classList.remove('hidden');
+    if (iconPause) iconPause.classList.add('hidden');
 });
 
 // Volume
-btnMute.addEventListener('click', () => {
-    remoteVideo.muted = !remoteVideo.muted;
-    updateVolumeUI();
-});
+if (btnMute) {
+    btnMute.addEventListener('click', () => {
+        remoteVideo.muted = !remoteVideo.muted;
+        updateVolumeUI();
+    });
+}
 
-volumeSlider.addEventListener('input', (e) => {
-    remoteVideo.volume = e.target.value;
-    remoteVideo.muted = remoteVideo.volume === 0;
-    updateVolumeUI();
-});
+if (volumeSlider) {
+    volumeSlider.addEventListener('input', (e) => {
+        remoteVideo.volume = e.target.value;
+        remoteVideo.muted = remoteVideo.volume === 0;
+        updateVolumeUI();
+    });
+}
 
 function updateVolumeUI() {
+    if (!iconVolumeOn || !iconVolumeOff) return;
     if (remoteVideo.muted || remoteVideo.volume === 0) {
         iconVolumeOn.classList.add('hidden');
         iconVolumeOff.classList.remove('hidden');
@@ -108,19 +94,22 @@ function updateVolumeUI() {
         iconVolumeOn.classList.remove('hidden');
         iconVolumeOff.classList.add('hidden');
     }
-    volumeSlider.value = remoteVideo.muted ? 0 : remoteVideo.volume;
+    if (volumeSlider) volumeSlider.value = remoteVideo.muted ? 0 : remoteVideo.volume;
 }
 
 // Fullscreen
-btnFullscreen.addEventListener('click', () => {
-    if (document.fullscreenElement) {
-        document.exitFullscreen();
-    } else {
-        videoContainer.requestFullscreen();
-    }
-});
+if (btnFullscreen && videoContainer) {
+    btnFullscreen.addEventListener('click', () => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            videoContainer.requestFullscreen();
+        }
+    });
+}
 
 document.addEventListener('fullscreenchange', () => {
+    if (!iconFullscreenEnter || !iconFullscreenExit) return;
     if (document.fullscreenElement) {
         iconFullscreenEnter.classList.add('hidden');
         iconFullscreenExit.classList.remove('hidden');
@@ -129,113 +118,6 @@ document.addEventListener('fullscreenchange', () => {
         iconFullscreenExit.classList.add('hidden');
     }
 });
-
-// ==================== QUALITY SELECTOR ====================
-
-// Toggle quality dropdown
-btnQuality.addEventListener('click', (e) => {
-    e.stopPropagation();
-    qualityDropdown.classList.toggle('hidden');
-});
-
-// Close dropdown when clicking outside
-document.addEventListener('click', () => {
-    qualityDropdown.classList.add('hidden');
-});
-
-qualityDropdown.addEventListener('click', (e) => {
-    e.stopPropagation();
-});
-
-function setupQualityOptions(settings) {
-    if (!settings) return;
-
-    const sourceHeight = settings.resolution;
-    const layerCount = settings.layerCount || 4;
-
-    // Define quality levels
-    const qualityLevels = [
-        { height: 1080, label: '1080p' },
-        { height: 720, label: '720p' },
-        { height: 480, label: '480p' },
-        { height: 360, label: '360p' },
-        { height: 240, label: '240p' },
-        { height: 144, label: '144p' }
-    ];
-
-    // Filter available levels based on source resolution
-    const availableLevels = qualityLevels.filter(q => q.height <= sourceHeight);
-    const selectedLevels = availableLevels.slice(0, layerCount);
-
-    // Clear existing options
-    qualityOptions.innerHTML = '';
-
-    // Add quality options (highest to lowest for UI)
-    selectedLevels.forEach((level, index) => {
-        // Calculate layer index (reverse since broadcasters send in reverse order)
-        const spatialLayer = selectedLevels.length - 1 - index;
-
-        const btn = document.createElement('button');
-        btn.className = 'quality-option w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10 transition-colors flex items-center justify-between';
-        btn.dataset.quality = level.height;
-        btn.dataset.layer = spatialLayer;
-        btn.innerHTML = `
-            <span>${level.label}${level.height === sourceHeight ? ' (Kaynak)' : ''}</span>
-            <svg class="w-4 h-4 text-brand-500 checkmark hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-        `;
-        qualityOptions.appendChild(btn);
-    });
-
-    // Add click handlers
-    document.querySelectorAll('.quality-option').forEach(btn => {
-        btn.addEventListener('click', () => selectQuality(btn));
-    });
-
-    // Select auto by default
-    selectQuality(document.querySelector('[data-quality="auto"]'));
-
-    console.log('🎚️ Quality options set up:', selectedLevels.map(l => l.label));
-}
-
-function selectQuality(btn) {
-    if (!btn) return;
-
-    const quality = btn.dataset.quality;
-    const layer = parseInt(btn.dataset.layer);
-
-    // Update UI
-    document.querySelectorAll('.quality-option .checkmark').forEach(c => c.classList.add('hidden'));
-    btn.querySelector('.checkmark')?.classList.remove('hidden');
-
-    selectedQuality = quality;
-    currentQuality.textContent = quality === 'auto' ? 'Auto' : quality + 'p';
-
-    // Change layer on server
-    if (videoConsumerId && quality !== 'auto') {
-        socket.emit('set-preferred-layers', {
-            consumerId: videoConsumerId,
-            spatialLayer: layer,
-            temporalLayer: 0
-        }, (response) => {
-            if (response?.success) {
-                console.log(`✅ Quality changed to ${quality}p (layer ${layer})`);
-            } else {
-                console.error('❌ Quality change failed:', response?.error);
-            }
-        });
-    } else if (videoConsumerId && quality === 'auto') {
-        // Reset to highest layer for auto
-        const highestLayer = broadcasterSettings?.layerCount ? broadcasterSettings.layerCount - 1 : 3;
-        socket.emit('set-preferred-layers', {
-            consumerId: videoConsumerId,
-            spatialLayer: highestLayer,
-            temporalLayer: 0
-        });
-        console.log('🔄 Auto quality enabled');
-    }
-
-    qualityDropdown.classList.add('hidden');
-}
 
 // ==================== STREAM LOGIC ====================
 
@@ -308,18 +190,6 @@ async function consumeProducer(producerId) {
         });
 
         consumers.set(consumer.id, consumer);
-
-        // Store video consumer ID for layer switching
-        if (params.kind === 'video') {
-            videoConsumerId = consumer.id;
-            console.log('📹 Video consumer ID stored:', videoConsumerId);
-
-            // Apply broadcaster settings if received
-            if (params.broadcasterSettings) {
-                broadcasterSettings = params.broadcasterSettings;
-                setupQualityOptions(params.broadcasterSettings);
-            }
-        }
 
         const { track } = consumer;
 
