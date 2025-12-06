@@ -73,8 +73,11 @@ module.exports = {
                     announcedIp: '130.61.104.4'
                 }
             ],
-            maxIncomingBitrate: 25000000, // Increased to 25 Mbps to support high quality
-            initialAvailableOutgoingBitrate: 1000000,
+            maxIncomingBitrate: 50000000, // 50 Mbps for high quality
+            initialAvailableOutgoingBitrate: 5000000, // Start at 5 Mbps for faster playback
+            enableUdp: true,
+            enableTcp: true,
+            preferUdp: true
         }
     },
 

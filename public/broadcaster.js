@@ -98,15 +98,26 @@ async function startShare() {
 
                 const videoTrack = stream.getVideoTracks()[0];
 
-                // Simple single-layer encoding for smooth performance
-                // Quality selector will work via consumer-side layer switching
+                // Optimize for screen content
+                if (videoTrack.contentHint !== undefined) {
+                    videoTrack.contentHint = 'detail'; // Optimize for text/detail (screen sharing)
+                }
+
+                // Performance-optimized encoding
                 videoProducer = await producerTransport.produce({
                     track: videoTrack,
                     encodings: [
-                        { maxBitrate: bitrate }
+                        {
+                            maxBitrate: bitrate,
+                            networkPriority: 'high',
+                            priority: 'high'
+                        }
                     ],
                     codecOptions: {
-                        videoGoogleStartBitrate: 1000
+                        videoGoogleStartBitrate: bitrate / 2 // Start at 50% of max for faster ramp-up
+                    },
+                    appData: {
+                        source: 'screen'
                     }
                 });
 
