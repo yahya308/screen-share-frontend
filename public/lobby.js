@@ -239,3 +239,19 @@ socket.on('connect', () => {
     console.log('Connected to server');
     loadRooms();
 });
+
+// Real-time room updates
+socket.on('room-created', (room) => {
+    console.log('Room created:', room);
+    loadRooms(); // Refresh the entire list
+});
+
+socket.on('room-updated', (update) => {
+    console.log('Room updated:', update);
+    loadRooms(); // Refresh to show updated user count
+});
+
+socket.on('room-deleted', ({ id }) => {
+    console.log('Room deleted:', id);
+    loadRooms(); // Refresh to remove deleted room
+});
