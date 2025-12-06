@@ -113,12 +113,14 @@ io.on('connection', (socket) => {
         socket.join(roomId);
 
         const roomState = roomManager.rooms.get(roomId);
+        const userCount = roomManager.getRoomUserCount(roomId);
 
         callback({
             success: true,
             roomId,
             roomName: room.name,
             maxUsers: room.max_users,
+            userCount,
             isStreaming: roomState?.isStreaming || false
         });
 
@@ -310,6 +312,23 @@ io.on('connection', (socket) => {
             console.error('Produce error:', error);
             callback({ error: error.message });
         }
+    });
+
+    // Get existing producers
+    socket.on('getProducers', (callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback([]);
+            return;
+        }
+
+        const producerIds = [];
+        socketData.roomState.producers.forEach((producer) => {
+            producerIds.push(producer.id);
+        });
+
+        console.log(`📡 Sending ${producerIds.length} producers to ${socket.id}`);
+        callback(producerIds);
     });
 
     // Consume

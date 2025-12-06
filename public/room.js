@@ -79,6 +79,7 @@ socket.on('connect', () => {
             }
 
             roomName.textContent = result.roomName;
+            userCount.textContent = result.userCount || 1;
             maxUsersInput.value = result.maxUsers || 100;
 
             isAdmin = true;
@@ -219,16 +220,15 @@ async function initMediasoup() {
         await device.load({ routerRtpCapabilities: rtpCapabilities });
 
         if (isAdmin) {
-            await createSendTransport();
+            createSendTransport();
         } else {
-            await createRecvTransport();
-            getProducers();
+            createRecvTransport();
         }
     });
 }
 
-async function createSendTransport() {
-    socket.emit('createWebRtcTransport', { sender: true }, async ({ params }) => {
+function createSendTransport() {
+    socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
         if (params.error) {
             console.error(params.error);
             return;
@@ -255,8 +255,8 @@ async function createSendTransport() {
     });
 }
 
-async function createRecvTransport() {
-    socket.emit('createWebRtcTransport', { sender: false }, async ({ params }) => {
+function createRecvTransport() {
+    socket.emit('createWebRtcTransport', { sender: false }, ({ params }) => {
         if (params.error) {
             console.error(params.error);
             return;
@@ -268,6 +268,9 @@ async function createRecvTransport() {
             socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters });
             callback();
         });
+
+        // Transport ready, now get producers
+        getProducers();
     });
 }
 
