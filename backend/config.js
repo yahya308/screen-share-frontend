@@ -34,22 +34,22 @@ module.exports = {
                         usedtx: 1         // ⭐ Discontinuous transmission (bandwidth saving)
                     }
                 },
-                // ⭐ VP9 - Best for screen sharing (30-50% better compression)
-                {
-                    kind: 'video',
-                    mimeType: 'video/VP9',
-                    clockRate: 90000,
-                    parameters: {
-                        'profile-id': 0  // Profile 0 optimized for screen content
-                    }
-                },
-                // VP8 - Fallback for older browsers
+                // ⭐ VP8 - FIRST for simulcast support (VP9 doesn't support simulcast!)
                 {
                     kind: 'video',
                     mimeType: 'video/VP8',
                     clockRate: 90000,
                     parameters: {
                         'x-google-start-bitrate': 1000
+                    }
+                },
+                // VP9 - Fallback (doesn't support simulcast, only SVC)
+                {
+                    kind: 'video',
+                    mimeType: 'video/VP9',
+                    clockRate: 90000,
+                    parameters: {
+                        'profile-id': 0  // Profile 0 optimized for screen content
                     }
                 },
                 // ⭐ H264 - For iOS Safari compatibility
