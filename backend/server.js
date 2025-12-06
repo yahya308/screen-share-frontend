@@ -95,6 +95,33 @@ io.on('connection', (socket) => {
         });
     });
 
+    // Admin rejoin (after page redirect)
+    socket.on('admin-rejoin', async ({ roomId }, callback) => {
+        const room = database.getRoom(roomId);
+        if (!room) {
+            callback({ error: 'Oda bulunamadı' });
+            return;
+        }
+
+        // Update admin socket ID
+        database.updateAdminSocket(roomId, socket.id);
+        roomManager.socketRooms.set(socket.id, { roomId, role: 'admin' });
+
+        socket.join(roomId);
+
+        const roomState = roomManager.rooms.get(roomId);
+
+        callback({
+            success: true,
+            roomId,
+            roomName: room.name,
+            maxUsers: room.max_users,
+            isStreaming: roomState?.isStreaming || false
+        });
+
+        console.log(`👑 Admin rejoined room ${roomId} with new socket ${socket.id}`);
+    });
+
     // Join room
     socket.on('join-room', async ({ roomId, password }, callback) => {
         // Check rate limit

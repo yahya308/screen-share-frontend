@@ -70,10 +70,21 @@ socket.on('connect', () => {
     console.log('Connected to server');
 
     if (isAdminMode) {
-        // Already in room as admin (just created)
-        isAdmin = true;
-        setupAdminUI();
-        initMediasoup();
+        // Admin rejoining after redirect from lobby
+        socket.emit('admin-rejoin', { roomId }, (result) => {
+            if (result.error) {
+                showToast(result.error);
+                setTimeout(() => window.location.href = 'index.html', 2000);
+                return;
+            }
+
+            roomName.textContent = result.roomName;
+            maxUsersInput.value = result.maxUsers || 100;
+
+            isAdmin = true;
+            setupAdminUI();
+            initMediasoup();
+        });
     } else {
         // Join room as viewer
         socket.emit('join-room', { roomId }, (result) => {
