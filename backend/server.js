@@ -232,7 +232,7 @@ io.on('connection', async (socket) => {
         // Resume all consumers for this socket? 
         // For now, client handles resume logic per consumer if needed.
         // But we can keep this for backward compatibility or simple resume.
-        callback();
+        if (callback) callback();
     });
 
     socket.on('getProducers', (callback) => {
