@@ -141,7 +141,7 @@ function joinRoom(roomId, password = null) {
 btnCreateRoom.addEventListener('click', () => {
     roomNameInput.value = '';
     roomPasswordInput.value = '';
-    roomMaxUsersInput.value = '100';
+    roomMaxUsersInput.value = '8';
     createModal.classList.remove('hidden');
     createModal.classList.add('flex');
     roomNameInput.focus();
@@ -155,7 +155,7 @@ btnCancelCreate.addEventListener('click', () => {
 btnConfirmCreate.addEventListener('click', () => {
     const name = roomNameInput.value.trim();
     const password = roomPasswordInput.value.trim() || null;
-    const maxUsers = parseInt(roomMaxUsersInput.value) || 100;
+    const maxUsers = parseInt(roomMaxUsersInput.value) || 8;
 
     if (!name) {
         showToast('Oda adı gerekli');

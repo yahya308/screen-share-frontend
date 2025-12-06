@@ -542,6 +542,15 @@ socket.on('producer-closed', ({ remoteProducerId }) => {
     }
 });
 
+// Real-time user count updates
+socket.on('user-joined', ({ userCount: count }) => {
+    userCount.textContent = count;
+});
+
+socket.on('user-left', ({ userCount: count }) => {
+    userCount.textContent = count;
+});
+
 socket.on('room-closed', ({ reason }) => {
     showToast(reason);
     setTimeout(() => window.location.href = 'index.html', 2000);

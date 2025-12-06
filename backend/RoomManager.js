@@ -109,7 +109,8 @@ class RoomManager {
         // Track socket
         this.socketRooms.set(socketId, { roomId, role: 'viewer' });
 
-        console.log(`👤 User ${socketId} joined room ${roomId}`);
+        const newUserCount = this.getRoomUserCount(roomId);
+        console.log(`👤 User ${socketId} joined room ${roomId} (total: ${newUserCount})`);
 
         return {
             success: true,
@@ -117,7 +118,8 @@ class RoomManager {
             roomName: room.name,
             isStreaming: roomState.isStreaming,
             workerIndex: room.worker_index,
-            maxUsers: room.max_users
+            maxUsers: room.max_users,
+            userCount: newUserCount
         };
     }
 

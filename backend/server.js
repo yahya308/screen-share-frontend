@@ -434,6 +434,9 @@ function handleLeaveRoom(socket) {
     if (result.roomClosed) {
         io.to(result.roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
         io.emit('room-deleted', { id: result.roomId });
+    } else if (result.roomPending) {
+        // Admin is reconnecting, don't emit user-left yet
+        // The room is waiting for admin to rejoin
     } else {
         socket.to(result.roomId).emit('user-left', {
             userCount: roomManager.getRoomUserCount(result.roomId)
