@@ -44,7 +44,6 @@
             </div>
 
             <div class="flex items-center gap-4">
-                <!-- User Count -->
                 <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-full">
                     <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20">
                         <path
@@ -53,7 +52,6 @@
                     <span id="userCount">1</span>
                 </div>
 
-                <!-- Invite Button -->
                 <button id="btnInvite"
                     class="flex items-center gap-2 px-4 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-full transition-colors">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -76,7 +74,6 @@
                     <video id="localVideo" autoplay playsinline muted
                         class="hidden w-full h-full object-contain"></video>
 
-                    <!-- Stream Paused Overlay -->
                     <div id="pausedOverlay"
                         class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center hidden">
                         <svg class="w-16 h-16 text-slate-500 mb-4" fill="currentColor" viewBox="0 0 24 24">
@@ -86,7 +83,6 @@
                         <p class="text-slate-500 text-sm">Yayıncı yayını durdurdu</p>
                     </div>
 
-                    <!-- Waiting Overlay -->
                     <div id="waitingOverlay"
                         class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
                         <div
@@ -96,7 +92,6 @@
                     </div>
                 </div>
 
-                <!-- Video Controls (Viewer) -->
                 <div id="viewerControls" class="mt-4 flex items-center gap-4 hidden">
                     <button id="btnPlayPause" class="p-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors">
                         <svg id="iconPlay" class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
@@ -142,7 +137,6 @@
                         Yayın Kontrolleri
                     </h3>
 
-                    <!-- Stream Settings -->
                     <div class="space-y-3 mb-4">
                         <div>
                             <label class="text-xs text-slate-400">Çözünürlük</label>
@@ -171,7 +165,6 @@
                         </div>
                     </div>
 
-                    <!-- Stream Buttons -->
                     <div class="space-y-2">
                         <button id="btnStartStream"
                             class="w-full py-2 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2">
@@ -189,7 +182,6 @@
                         </button>
                     </div>
 
-                    <!-- Audio Controls -->
                     <div class="mt-4 pt-4 border-t border-slate-700 space-y-2">
                         <button id="btnToggleMic"
                             class="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-colors">
@@ -201,7 +193,6 @@
                         </button>
                     </div>
 
-                    <!-- Room Settings -->
                     <div class="mt-4 pt-4 border-t border-slate-700">
                         <div class="mb-3">
                             <label class="text-xs text-slate-400">Max Kullanıcı</label>
@@ -214,7 +205,6 @@
                         </button>
                     </div>
 
-                    <!-- Close Room -->
                     <div class="mt-4 pt-4 border-t border-slate-700">
                         <button id="btnCloseRoom"
                             class="w-full py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg text-sm transition-colors">
@@ -223,7 +213,6 @@
                     </div>
                 </div>
 
-                <!-- Room Info (Viewer) -->
                 <div id="viewerInfo" class="bg-slate-800 rounded-xl p-4 border border-slate-700 hidden">
                     <p class="text-slate-400 text-center">Yayını izliyorsunuz</p>
                 </div>
@@ -231,6 +220,29 @@
             </div>
         </div>
     </main>
+
+    <!-- Password Modal -->
+    <div id="passwordModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 border border-slate-700">
+            <h3 class="text-xl font-bold mb-2">Şifre Gerekli</h3>
+            <p class="text-slate-400 mb-4">Bu oda şifre ile korunuyor</p>
+            <div class="space-y-4">
+                <input id="passwordInput" type="password" placeholder="Oda şifresi"
+                    class="w-full px-4 py-2 bg-slate-700 rounded-lg border border-slate-600 focus:border-brand-500 focus:outline-none">
+                <p id="passwordModalError" class="text-red-400 text-sm hidden"></p>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button id="btnCancelPassword"
+                    class="flex-1 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition-colors">
+                    Geri
+                </button>
+                <button id="btnSubmitPassword"
+                    class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 font-semibold transition-colors">
+                    Katıl
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast -->
     <div id="toast"

@@ -86,27 +86,103 @@ socket.on('connect', () => {
             initMediasoup();
         });
     } else {
+        // Try to get stored password from lobby
+        const storedPassword = sessionStorage.getItem(`room_password_${roomId}`);
+
         // Join room as viewer
-        socket.emit('join-room', { roomId }, (result) => {
-            if (result.error) {
+        attemptJoinRoom(storedPassword);
+    }
+});
+
+function attemptJoinRoom(password) {
+    socket.emit('join-room', { roomId, password }, (result) => {
+        if (result.error) {
+            if (result.needPassword) {
+                // Show password modal
+                showPasswordModal();
+            } else if (result.blocked) {
+                showToast(`${result.error}`);
+                setTimeout(() => window.location.href = 'index.html', 3000);
+            } else {
                 showToast(result.error);
                 setTimeout(() => window.location.href = 'index.html', 2000);
+            }
+            return;
+        }
+
+        // Success - clear stored password
+        sessionStorage.removeItem(`room_password_${roomId}`);
+
+        roomName.textContent = result.roomName;
+        userCount.textContent = result.userCount || 1;
+        maxUsersInput.value = result.maxUsers || 100;
+
+        isAdmin = false;
+        setupViewerUI();
+
+        if (result.isStreaming) {
+            initMediasoup();
+        }
+    });
+}
+
+function showPasswordModal() {
+    const modal = document.getElementById('passwordModal');
+    const input = document.getElementById('passwordInput');
+    const btnSubmit = document.getElementById('btnSubmitPassword');
+    const btnCancel = document.getElementById('btnCancelPassword');
+    const errorEl = document.getElementById('passwordModalError');
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    input.value = '';
+    input.focus();
+    errorEl.classList.add('hidden');
+
+    const handleSubmit = () => {
+        const password = input.value;
+        if (!password) {
+            errorEl.textContent = 'Şifre girin';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        socket.emit('join-room', { roomId, password }, (result) => {
+            if (result.error) {
+                if (result.needPassword) {
+                    errorEl.textContent = `Yanlış şifre (${result.remainingAttempts} deneme kaldı)`;
+                    errorEl.classList.remove('hidden');
+                } else if (result.blocked) {
+                    modal.classList.add('hidden');
+                    showToast(`${result.error}`);
+                    setTimeout(() => window.location.href = 'index.html', 3000);
+                } else {
+                    errorEl.textContent = result.error;
+                    errorEl.classList.remove('hidden');
+                }
                 return;
             }
 
+            // Success
+            modal.classList.add('hidden');
             roomName.textContent = result.roomName;
             userCount.textContent = result.userCount || 1;
             maxUsersInput.value = result.maxUsers || 100;
-
             isAdmin = false;
             setupViewerUI();
-
             if (result.isStreaming) {
                 initMediasoup();
             }
         });
-    }
-});
+    };
+
+    btnSubmit.onclick = handleSubmit;
+    input.onkeypress = (e) => { if (e.key === 'Enter') handleSubmit(); };
+    btnCancel.onclick = () => {
+        modal.classList.add('hidden');
+        window.location.href = 'index.html';
+    };
+}
 
 function setupAdminUI() {
     adminPanel.classList.remove('hidden');

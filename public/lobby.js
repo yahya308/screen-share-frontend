@@ -127,7 +127,10 @@ function joinRoom(roomId, password = null) {
             return;
         }
 
-        // Success - redirect to room
+        // Success - store password for room.js and redirect
+        if (password) {
+            sessionStorage.setItem(`room_password_${roomId}`, password);
+        }
         closePasswordModal();
         window.location.href = `room.html?roomId=${roomId}`;
     });
