@@ -1,6 +1,6 @@
 import { Device } from "mediasoup-client";
 
-const socket = io("https://yahya-sfu.duckdns.org:3000");
+const socket = io("https://yahya-oracle.duckdns.org"); // Connect to Oracle Cloud Backend
 const btnConsume = document.getElementById('btnConsume');
 const status = document.getElementById('status');
 const remoteVideo = document.getElementById('remoteVideo');

@@ -1,6 +1,6 @@
 module.exports = {
-    // Public IP of the server (Hetzner VPS)
-    announcedIp: '167.235.53.246',
+    // Public IP of the server (Oracle Cloud)
+    announcedIp: '130.61.104.4',
 
     // Port to listen on
     port: 3000,
@@ -70,7 +70,7 @@ module.exports = {
             listenIps: [
                 {
                     ip: '0.0.0.0',
-                    announcedIp: '167.235.53.246'
+                    announcedIp: '130.61.104.4'
                 }
             ],
             maxIncomingBitrate: 25000000, // Increased to 25 Mbps to support high quality
@@ -78,10 +78,10 @@ module.exports = {
         }
     },
 
-    // HTTPS Configuration
+    // HTTPS Configuration (SSL terminated by Nginx, but kept for reference)
     https: {
-        domain: 'yahya-sfu.duckdns.org',
-        cert: '/etc/letsencrypt/live/yahya-sfu.duckdns.org/fullchain.pem',
-        key: '/etc/letsencrypt/live/yahya-sfu.duckdns.org/privkey.pem'
+        domain: 'yahya-oracle.duckdns.org',
+        cert: '/etc/letsencrypt/live/yahya-oracle.duckdns.org/fullchain.pem',
+        key: '/etc/letsencrypt/live/yahya-oracle.duckdns.org/privkey.pem'
     }
 };
