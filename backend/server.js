@@ -1,344 +1,419 @@
+/**
+ * VELOSTREAM Server - Room-based streaming with multi-core support
+ */
+
 const express = require('express');
-const app = express();
-const https = require('https');
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const { Server } = require('socket.io');
-const mediasoup = require('mediasoup');
+const cors = require('cors');
+
 const config = require('./config');
+const WorkerManager = require('./WorkerManager');
+const RoomManager = require('./RoomManager');
+const database = require('./database');
+const rateLimiter = require('./RateLimiter');
 
-let webServer;
+const app = express();
+app.use(cors());
+app.use(express.static('../public'));
 
-// Try to create HTTPS server if certs exist
-try {
-    console.log('Checking SSL files...');
-    console.log('Cert path:', config.https.cert);
-    console.log('Key path:', config.https.key);
+// ==================== SERVER SETUP ====================
 
-    const certExists = fs.existsSync(config.https.cert);
-    const keyExists = fs.existsSync(config.https.key);
+let server;
 
-    console.log('Cert exists:', certExists);
-    console.log('Key exists:', keyExists);
+// Check for SSL certificates
+const certPath = config.https?.cert;
+const keyPath = config.https?.key;
 
-    if (certExists && keyExists) {
-        const options = {
-            cert: fs.readFileSync(config.https.cert),
-            key: fs.readFileSync(config.https.key)
-        };
-        webServer = https.createServer(options, app);
-        console.log('Running in HTTPS mode');
-    } else {
-        console.log('SSL files not found, falling back to HTTP');
-        webServer = http.createServer(app);
-    }
-} catch (err) {
-    console.log('Error checking SSL files, falling back to HTTP', err);
-    webServer = http.createServer(app);
+if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    server = https.createServer({
+        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(keyPath)
+    }, app);
+    console.log('🔒 HTTPS Server');
+} else {
+    server = http.createServer(app);
+    console.log('⚠️ HTTP Server (SSL not found)');
 }
 
-const io = new Server(webServer, {
+const io = new Server(server, {
     cors: {
-        origin: "*",
+        origin: '*',
+        methods: ['GET', 'POST']
     }
 });
 
-// --- Global Variables ---
-let worker;
-let router;
-// let producer; // REMOVED: Single producer is not enough
-const producers = new Map(); // Store all producers: producer.id -> producer
-const consumers = new Map(); // Store all consumers: consumer.id -> { consumer, socketId }
-// We need to store transports to find them later
-const transports = [];
+// ==================== MANAGERS ====================
 
-// ⭐ Track broadcasters to exclude them from viewer count
-const broadcasters = new Set(); // socketId
+const workerManager = new WorkerManager();
+let roomManager;
 
-// ⭐ Store broadcaster settings for simulcast
-let broadcasterSettings = null;
+// ==================== SOCKET HANDLERS ====================
 
-// --- Mediasoup Worker & Router ---
-async function startMediasoup() {
-    worker = await mediasoup.createWorker(config.mediasoup.worker);
+io.on('connection', (socket) => {
+    const clientIp = socket.handshake.address;
+    console.log(`Client connected: ${socket.id}`);
 
-    worker.on('died', () => {
-        console.error('mediasoup worker died, exiting in 2 seconds... [pid:%d]', worker.pid);
-        setTimeout(() => process.exit(1), 2000);
+    // ==================== LOBBY EVENTS ====================
+
+    // Get all rooms
+    socket.on('get-rooms', (callback) => {
+        const rooms = roomManager.getAllRooms();
+        callback(rooms);
     });
 
-    router = await worker.createRouter({ mediaCodecs: config.mediasoup.router.mediaCodecs });
-    console.log('✅ Mediasoup Router created');
-}
+    // Create room
+    socket.on('create-room', async ({ name, password, maxUsers }, callback) => {
+        const result = await roomManager.createRoom({
+            name,
+            password,
+            adminSocketId: socket.id,
+            maxUsers
+        });
 
-startMediasoup();
+        if (result.error) {
+            callback({ error: result.error });
+            return;
+        }
 
-// --- Socket.io Handling ---
-io.on('connection', async (socket) => {
-    console.log('Client connected:', socket.id);
+        socket.join(result.roomId);
+        callback({
+            success: true,
+            roomId: result.roomId,
+            isPublic: result.isPublic
+        });
 
-    socket.emit('connection-success', {
-        socketId: socket.id,
+        // Notify lobby of new room
+        io.emit('room-created', {
+            id: result.roomId,
+            name,
+            is_locked: !!password,
+            userCount: 1,
+            max_users: maxUsers || 100
+        });
     });
 
-    // Viewer Count Helper Functions
-    const getViewerCount = () => {
-        // ⭐ Total connections minus broadcasters = actual viewers
-        return io.sockets.sockets.size - broadcasters.size;
-    };
+    // Join room
+    socket.on('join-room', async ({ roomId, password }, callback) => {
+        // Check rate limit
+        const blockStatus = rateLimiter.isBlocked(clientIp, roomId);
+        if (blockStatus.blocked) {
+            callback({
+                error: `Çok fazla yanlış deneme. ${blockStatus.remainingTime} saniye bekleyin.`,
+                blocked: true,
+                remainingTime: blockStatus.remainingTime
+            });
+            return;
+        }
 
-    const emitViewerCount = () => {
-        const count = getViewerCount();
-        console.log(`Broadcasting viewer count: ${count}`);
-        io.emit('viewer-count-update', count);
-    };
+        const result = await roomManager.joinRoom(roomId, socket.id, password, clientIp);
 
-    // Viewer Count: Broadcast current count to all clients on new connection
-    emitViewerCount();
+        if (result.error) {
+            if (result.needPassword && password) {
+                // Wrong password, record failed attempt
+                const attemptResult = rateLimiter.recordFailedAttempt(clientIp, roomId);
+                callback({
+                    error: result.error,
+                    needPassword: true,
+                    remainingAttempts: attemptResult.remainingAttempts,
+                    blocked: attemptResult.blocked,
+                    remainingTime: attemptResult.remainingTime
+                });
+            } else {
+                callback(result);
+            }
+            return;
+        }
 
-    // 1. Get Router RTP Capabilities
+        // Success - reset rate limiter
+        rateLimiter.resetAttempts(clientIp, roomId);
+
+        socket.join(roomId);
+        callback(result);
+
+        // Notify room of new user
+        socket.to(roomId).emit('user-joined', {
+            userCount: roomManager.getRoomUserCount(roomId)
+        });
+
+        // Update lobby
+        io.emit('room-updated', {
+            id: roomId,
+            userCount: roomManager.getRoomUserCount(roomId)
+        });
+    });
+
+    // Leave room
+    socket.on('leave-room', () => {
+        handleLeaveRoom(socket);
+    });
+
+    // Close room (admin only)
+    socket.on('close-room', () => {
+        if (roomManager.isAdmin(socket.id)) {
+            const socketData = roomManager.getRoomFromSocket(socket.id);
+            if (socketData) {
+                const roomId = socketData.roomId;
+
+                // Notify all users in room
+                io.to(roomId).emit('room-closed', { reason: 'Admin odayı kapattı' });
+
+                roomManager.closeRoom(roomId);
+
+                // Update lobby
+                io.emit('room-deleted', { id: roomId });
+            }
+        }
+    });
+
+    // Update max users (admin only)
+    socket.on('update-max-users', ({ maxUsers }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) {
+            callback({ error: 'Yetkiniz yok' });
+            return;
+        }
+
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (socketData) {
+            roomManager.updateMaxUsers(socketData.roomId, maxUsers);
+            callback({ success: true });
+        }
+    });
+
+    // ==================== MEDIASOUP EVENTS ====================
+
+    // Get router capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
-        callback(router.rtpCapabilities);
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback({ error: 'Odaya katılmadınız' });
+            return;
+        }
+        callback(socketData.roomState.router.rtpCapabilities);
     });
 
-    // 2. Create Transport
+    // Create transport
     socket.on('createWebRtcTransport', async ({ sender }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback({ params: { error: 'Odaya katılmadınız' } });
+            return;
+        }
+
+        // Only admin can be sender
+        if (sender && socketData.role !== 'admin') {
+            callback({ params: { error: 'Yayın yapma yetkiniz yok' } });
+            return;
+        }
+
         try {
-            const webRtcTransport_options = {
-                ...config.mediasoup.webRtcTransport
-            };
+            const roomState = socketData.roomState;
+            const transport = await roomState.router.createWebRtcTransport(
+                config.mediasoup.webRtcTransport
+            );
 
-            let transport = await router.createWebRtcTransport(webRtcTransport_options);
-
-            transport.on('dtlsstatechange', dtlsState => {
-                if (dtlsState === 'closed') {
-                    transport.close();
-                }
-            });
-
-            transport.on('close', () => {
-                console.log('Transport closed');
-            });
-
-            // Store transport
-            transports.push({ socketId: socket.id, transport, sender });
+            roomState.transports.set(socket.id + (sender ? '-send' : '-recv'), transport);
 
             callback({
                 params: {
                     id: transport.id,
                     iceParameters: transport.iceParameters,
                     iceCandidates: transport.iceCandidates,
-                    dtlsParameters: transport.dtlsParameters,
+                    dtlsParameters: transport.dtlsParameters
                 }
             });
         } catch (error) {
-            console.error(error);
+            console.error('Transport create error:', error);
+            callback({ params: { error: error.message } });
+        }
+    });
+
+    // Connect transport
+    socket.on('transport-connect', async ({ transportId, dtlsParameters }) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) return;
+
+        const transport = findTransport(socketData.roomState, transportId);
+        if (transport) {
+            await transport.connect({ dtlsParameters });
+        }
+    });
+
+    // Produce (admin only)
+    socket.on('transport-produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback({ error: 'Odaya katılmadınız' });
+            return;
+        }
+
+        if (socketData.role !== 'admin') {
+            callback({ error: 'Yayın yapma yetkiniz yok' });
+            return;
+        }
+
+        try {
+            const transport = findTransport(socketData.roomState, transportId);
+            if (!transport) {
+                callback({ error: 'Transport bulunamadı' });
+                return;
+            }
+
+            const producer = await transport.produce({ kind, rtpParameters, appData });
+            socketData.roomState.producers.set(producer.id, producer);
+
+            workerManager.incrementProducers(socketData.roomState.workerIndex);
+
+            // Set streaming status
+            if (kind === 'video') {
+                roomManager.setStreamingStatus(socketData.roomId, true);
+                socket.to(socketData.roomId).emit('stream-started');
+            }
+
+            callback({ id: producer.id });
+
+            // Notify viewers of new producer
+            socket.to(socketData.roomId).emit('new-producer', producer.id);
+        } catch (error) {
+            console.error('Produce error:', error);
+            callback({ error: error.message });
+        }
+    });
+
+    // Consume
+    socket.on('consume', async ({ transportId, producerId, rtpCapabilities }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback({ params: { error: 'Odaya katılmadınız' } });
+            return;
+        }
+
+        try {
+            const roomState = socketData.roomState;
+
+            if (!roomState.router.canConsume({ producerId, rtpCapabilities })) {
+                callback({ params: { error: 'Cannot consume' } });
+                return;
+            }
+
+            const transport = findTransport(roomState, transportId);
+            if (!transport) {
+                callback({ params: { error: 'Transport bulunamadı' } });
+                return;
+            }
+
+            const consumer = await transport.consume({
+                producerId,
+                rtpCapabilities,
+                paused: true
+            });
+
+            roomState.consumers.set(socket.id, consumer);
+            workerManager.incrementConsumers(roomState.workerIndex);
+
             callback({
                 params: {
-                    error: error
+                    id: consumer.id,
+                    producerId,
+                    kind: consumer.kind,
+                    rtpParameters: consumer.rtpParameters
                 }
             });
-        }
-    });
-
-    // 3. Connect Transport
-    socket.on('transport-connect', async ({ transportId, dtlsParameters }) => {
-        const item = transports.find(t => t.transport.id === transportId);
-        if (item) {
-            await item.transport.connect({ dtlsParameters });
-        }
-    });
-
-    // 4. Produce
-    socket.on('transport-produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
-        const item = transports.find(t => t.transport.id === transportId);
-        if (item) {
-            const producer = await item.transport.produce({
-                kind,
-                rtpParameters,
-            });
-
-            producers.set(producer.id, producer);
-
-            // ⭐ Mark this socket as a broadcaster
-            broadcasters.add(socket.id);
-            console.log(`👤 Broadcaster added: ${socket.id}. Total: ${broadcasters.size}`);
-            emitViewerCount(); // Update viewer count
-
-            producer.on('transportclose', () => {
-                console.log('transport for this producer closed');
-                producer.close();
-                producers.delete(producer.id);
-            });
-
-            console.log('Producer created with ID:', producer.id);
-
-            // Notify all other clients about the new producer
-            socket.broadcast.emit('new-producer', producer.id);
-
-            callback({
-                id: producer.id,
-                producersExist: true
-            });
-        }
-    });
-
-    // 5. Consume
-    socket.on('consume', async ({ transportId, producerId, rtpCapabilities }, callback) => {
-        try {
-            const producer = producers.get(producerId);
-
-            if (!producer) {
-                return callback({ params: { error: 'No producer exists' } });
-            }
-
-            if (!router.canConsume({ producerId: producer.id, rtpCapabilities })) {
-                return callback({ params: { error: 'Cannot consume' } });
-            }
-
-            const item = transports.find(t => t.transport.id === transportId);
-            if (!item) return;
-
-            const consumer = await item.transport.consume({
-                producerId: producer.id,
-                rtpCapabilities,
-                paused: true,
-            });
-
-            // Store consumer for layer switching
-            consumers.set(consumer.id, { consumer, socketId: socket.id });
-
-            consumer.on('transportclose', () => {
-                console.log('Consumer transport closed');
-                consumers.delete(consumer.id);
-            });
-
-            consumer.on('producerclose', () => {
-                console.log('Producer closed');
-                socket.emit('producer-closed', { remoteProducerId: producer.id });
-                consumers.delete(consumer.id);
-                consumer.close();
-            });
-
-            const params = {
-                id: consumer.id,
-                producerId: producer.id,
-                kind: consumer.kind,
-                rtpParameters: consumer.rtpParameters,
-                broadcasterSettings: broadcasterSettings, // Send broadcaster info for quality options
-            };
-
-            callback({ params });
-            await consumer.resume();
-
         } catch (error) {
             console.error('Consume error:', error);
-            callback({ params: { error: error } });
+            callback({ params: { error: error.message } });
         }
     });
 
-    socket.on('resume', async (data, callback) => {
-        // Resume all consumers for this socket? 
-        // For now, client handles resume logic per consumer if needed.
-        // But we can keep this for backward compatibility or simple resume.
-        if (callback) callback();
+    // Resume consumer
+    socket.on('resume', async () => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) return;
+
+        const consumer = socketData.roomState.consumers.get(socket.id);
+        if (consumer) {
+            await consumer.resume();
+        }
     });
 
+    // Get producers
     socket.on('getProducers', (callback) => {
-        // Return array of producer IDs
-        callback(Array.from(producers.keys()));
-    });
-
-    // ⭐ Broadcaster settings for simulcast quality info
-    socket.on('broadcaster-settings', (settings) => {
-        console.log('📺 Broadcaster settings received:', settings);
-        broadcasterSettings = settings;
-        // Notify all viewers about stream info
-        socket.broadcast.emit('stream-info', settings);
-    });
-
-    // ⭐ Set preferred layers for quality switching
-    socket.on('set-preferred-layers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
-        try {
-            const entry = consumers.get(consumerId);
-            if (entry && entry.consumer) {
-                await entry.consumer.setPreferredLayers({
-                    spatialLayer: spatialLayer,
-                    temporalLayer: temporalLayer || 0
-                });
-                console.log(`🎚️ Layer changed for consumer ${consumerId}: spatial=${spatialLayer}`);
-                if (callback) callback({ success: true });
-            } else {
-                if (callback) callback({ success: false, error: 'Consumer not found' });
-            }
-        } catch (error) {
-            console.error('Set preferred layers error:', error);
-            if (callback) callback({ success: false, error: error.message });
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback([]);
+            return;
         }
+        callback(Array.from(socketData.roomState.producers.keys()));
     });
 
-    // ⭐ Get current stream info (for late-joining viewers)
-    socket.on('get-stream-info', (callback) => {
-        callback(broadcasterSettings);
-    });
-
-    // Viewer Count: Handle request for current viewer count
-    socket.on('get-viewer-count', () => {
-        const viewerCount = io.sockets.sockets.size;
-        console.log(`Viewer count requested by ${socket.id}. Sending: ${viewerCount}`);
-        socket.emit('viewer-count-response', viewerCount);
-    });
-
+    // Producer closing (pause/stop stream)
     socket.on('producer-closing', ({ producerId }) => {
-        const producer = producers.get(producerId);
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) return;
+
+        const producer = socketData.roomState.producers.get(producerId);
         if (producer) {
-            console.log('Producer closing requested by client:', producerId);
+            if (producer.kind === 'video') {
+                roomManager.setStreamingStatus(socketData.roomId, false);
+                socket.to(socketData.roomId).emit('stream-paused');
+            }
+
             producer.close();
-            producers.delete(producerId);
-            // We DO NOT broadcast 'producer-closed' here anymore.
-            // Closing the producer triggers 'producerclose' on all consumers,
-            // which then emits 'producer-closed' to their respective clients.
-            // This prevents duplicate events.
+            socketData.roomState.producers.delete(producerId);
+            workerManager.decrementProducers(socketData.roomState.workerIndex);
+
+            socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: producerId });
         }
     });
+
+    // ==================== DISCONNECT ====================
 
     socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
-
-        // 1. Find and close all transports associated with this socket
-        const userTransports = transports.filter(t => t.socketId === socket.id);
-        userTransports.forEach(t => {
-            console.log('Closing transport for disconnected user:', t.transport.id);
-            t.transport.close(); // This will trigger 'transportclose' on producers/consumers
-        });
-
-        // Remove from transports array
-        for (let i = transports.length - 1; i >= 0; i--) {
-            if (transports[i].socketId === socket.id) {
-                transports.splice(i, 1);
-            }
-        }
-
-        // 2. Clean up producers (if any were not closed by transport close)
-        // (Actually, closing transport closes producers, but good to be safe)
-        for (const [producerId, producer] of producers) {
-            // We don't easily know which socket owns which producer unless we stored it.
-            // But since we closed the transport, the producer should have emitted 'transportclose'
-            // and removed itself from the map via the listener we added in 'transport-produce'.
-        }
-
-        // Viewer Count: Remove from broadcasters if they were broadcasting
-        broadcasters.delete(socket.id);
-        console.log(`Broadcaster removed: ${socket.id}. Remaining broadcasters: ${broadcasters.size}`);
-
-        // Broadcast updated count after disconnect
-        const viewerCount = io.sockets.sockets.size - broadcasters.size;
-        console.log(`Client disconnected. Remaining viewers: ${viewerCount}`);
-        io.emit('viewer-count-update', viewerCount);
+        console.log(`Client disconnected: ${socket.id}`);
+        handleLeaveRoom(socket);
     });
 });
 
-const PORT = 3000;
-webServer.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-});
+// ==================== HELPERS ====================
+
+function handleLeaveRoom(socket) {
+    const result = roomManager.leaveRoom(socket.id);
+    if (!result) return;
+
+    if (result.roomClosed) {
+        io.to(result.roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
+        io.emit('room-deleted', { id: result.roomId });
+    } else {
+        socket.to(result.roomId).emit('user-left', {
+            userCount: roomManager.getRoomUserCount(result.roomId)
+        });
+        io.emit('room-updated', {
+            id: result.roomId,
+            userCount: roomManager.getRoomUserCount(result.roomId)
+        });
+    }
+}
+
+function findTransport(roomState, transportId) {
+    for (const [key, transport] of roomState.transports) {
+        if (transport.id === transportId) return transport;
+    }
+    return null;
+}
+
+// ==================== STARTUP ====================
+
+async function start() {
+    await workerManager.init();
+    roomManager = new RoomManager(workerManager);
+
+    const PORT = config.port || 3000;
+    server.listen(PORT, () => {
+        console.log(`🚀 VELOSTREAM Server running on port ${PORT}`);
+        console.log(`📊 Workers: ${workerManager.workers.length}`);
+    });
+}
+
+start().catch(console.error);
