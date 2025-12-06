@@ -11,15 +11,10 @@ const localVideo = document.getElementById('localVideo');
 // Viewer Count Logic - Safe DOM Element Check
 const updateViewerCountUI = (count) => {
     const el = document.getElementById('viewer-count-display');
-    // Fallback: Try alternative ID if primary not found
     const targetEl = el || document.getElementById('viewerCount');
-
     if (targetEl) {
         targetEl.innerText = count;
-        targetEl.textContent = count; // Fallback for older browsers
         console.log("✅ UI Updated with count:", count);
-    } else {
-        console.warn("⚠️ Viewer Count Element NOT FOUND in DOM. Check HTML IDs.");
     }
 };
 
@@ -36,23 +31,20 @@ let systemAudioProducer;
 
 // Simulcast encoding configuration based on source resolution
 function generateSimulcastEncodings(sourceHeight, maxBitrate) {
-    // Define available quality levels
     const qualityLevels = [
         { height: 1080, bitrate: 2500000, label: '1080p' },
         { height: 720, bitrate: 1500000, label: '720p' },
         { height: 480, bitrate: 800000, label: '480p' },
-        { height: 360, bitrate: 400000, label: '360p' },
-        { height: 240, bitrate: 200000, label: '240p' },
-        { height: 144, bitrate: 100000, label: '144p' }
+        { height: 360, bitrate: 400000, label: '360p' }
     ];
 
     // Filter levels that are <= source resolution
     const availableLevels = qualityLevels.filter(q => q.height <= sourceHeight);
 
-    // Take up to 4 layers (simulcast typically supports 3-4)
-    const selectedLevels = availableLevels.slice(0, 4);
+    // Take up to 3 layers (simulcast standard)
+    const selectedLevels = availableLevels.slice(0, 3);
 
-    // Generate encodings from lowest to highest (mediasoup convention)
+    // Generate encodings from lowest to highest
     const encodings = selectedLevels.reverse().map((level, index) => {
         const scaleDown = sourceHeight / level.height;
         return {
@@ -77,10 +69,7 @@ socket.on('connect', () => {
     socket.emit('get-viewer-count');
 });
 
-// Viewer Count: Listen for viewer count updates (broadcast to all)
 socket.on('viewer-count-update', (count) => updateViewerCountUI(count));
-
-// Viewer Count: Listen for viewer count response (direct response)
 socket.on('viewer-count-response', (count) => updateViewerCountUI(count));
 
 async function startShare() {
@@ -89,20 +78,17 @@ async function startShare() {
     btnToggleMic.disabled = false;
     btnToggleAudio.disabled = false;
 
-    // Get User Settings
     const height = parseInt(resSelect.value);
     const fps = parseInt(fpsSelect.value);
     const bitrate = parseInt(bitrateInput.value) * 1000;
 
     try {
-        // 1. Get Router Capabilities
         socket.emit('getRouterRtpCapabilities', async (rtpCapabilities) => {
             if (!device) {
                 device = new Device();
                 await device.load({ routerRtpCapabilities: rtpCapabilities });
             }
 
-            // 2. Create Transport
             socket.emit('createWebRtcTransport', { sender: true }, async ({ params }) => {
                 if (params.error) {
                     console.error(params.error);
@@ -130,30 +116,33 @@ async function startShare() {
                     });
                 });
 
-                // 3. Capture Screen (Video + System Audio)
+                // Capture Screen
                 const stream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
                         height: { ideal: height },
                         frameRate: { ideal: fps },
                         width: { ideal: height * (16 / 9) }
                     },
-                    audio: true // Request system audio
+                    audio: true
                 });
 
                 localVideo.srcObject = stream;
 
-                // Video Track with Simulcast Encodings
                 const videoTrack = stream.getVideoTracks()[0];
-
-                // Generate simulcast encodings based on source resolution
                 const simulcastEncodings = generateSimulcastEncodings(height, bitrate);
+
+                // Find VP8 codec for simulcast (VP9 doesn't support simulcast in mediasoup)
+                const vp8Codec = device.rtpCapabilities.codecs.find(
+                    c => c.mimeType.toLowerCase() === 'video/vp8'
+                );
 
                 videoProducer = await producerTransport.produce({
                     track: videoTrack,
                     encodings: simulcastEncodings,
                     codecOptions: {
                         videoGoogleStartBitrate: 1000
-                    }
+                    },
+                    codec: vp8Codec
                 });
 
                 // Send stream info to server for viewers
@@ -166,7 +155,7 @@ async function startShare() {
 
                 videoTrack.onended = () => stopShare("Video Track Ended (Browser UI)");
 
-                // System Audio Track (if available)
+                // System Audio Track
                 const audioTrack = stream.getAudioTracks()[0];
                 if (audioTrack) {
                     systemAudioProducer = await producerTransport.produce({ track: audioTrack });
@@ -189,22 +178,18 @@ async function startShare() {
 
 async function toggleMic() {
     if (micProducer) {
-        // If mic exists, close it (or pause it)
         socket.emit('producer-closing', { producerId: micProducer.id });
         micProducer.close();
         micProducer = null;
         btnToggleMic.innerText = "Toggle Mic (Off)";
         document.getElementById('micVolume').value = 0;
     } else {
-        // ... (rest of enable mic logic)
-        // Enable Mic
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const track = stream.getAudioTracks()[0];
             micProducer = await producerTransport.produce({ track });
             btnToggleMic.innerText = "Toggle Mic (On)";
 
-            // Audio Level Analysis
             const audioContext = new AudioContext();
             const source = audioContext.createMediaStreamSource(stream);
             const analyser = audioContext.createAnalyser();
@@ -213,7 +198,7 @@ async function toggleMic() {
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
             function updateVolume() {
-                if (!micProducer) return; // Stop if mic is closed
+                if (!micProducer) return;
                 analyser.getByteFrequencyData(dataArray);
                 let sum = 0;
                 for (let i = 0; i < dataArray.length; i++) {
@@ -238,24 +223,15 @@ async function toggleSystemAudio() {
             systemAudioProducer.resume();
             btnToggleAudio.innerText = "Toggle System Audio (On)";
         } else {
-            // Option 1: Pause (Keep producer, just silence)
-            // systemAudioProducer.pause();
-            // btnToggleAudio.innerText = "Toggle System Audio (Off)";
-
-            // Option 2: Close (Remove producer) - Better for "removing" the track
             socket.emit('producer-closing', { producerId: systemAudioProducer.id });
             systemAudioProducer.close();
             systemAudioProducer = null;
             btnToggleAudio.innerText = "Toggle System Audio (Off)";
         }
     } else {
-        // Enable System Audio
         try {
-            // We need to ask for display media again to get system audio
             const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
             const audioTrack = stream.getAudioTracks()[0];
-
-            // We only want audio, so stop the video track immediately
             stream.getVideoTracks().forEach(track => track.stop());
 
             if (audioTrack) {
@@ -266,7 +242,6 @@ async function toggleSystemAudio() {
             }
         } catch (err) {
             console.error('System audio error:', err);
-            // alert('Could not access system audio: ' + err.message);
         }
     }
 }
