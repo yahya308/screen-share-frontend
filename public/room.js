@@ -49,6 +49,7 @@ const btnMute = document.getElementById('btnMute');
 const iconVolumeOn = document.getElementById('iconVolumeOn');
 const iconVolumeOff = document.getElementById('iconVolumeOff');
 const volumeSlider = document.getElementById('volumeSlider');
+const qualitySelect = document.getElementById('qualitySelect');
 const btnFullscreen = document.getElementById('btnFullscreen');
 
 const toast = document.getElementById('toast');
@@ -63,6 +64,8 @@ let micProducer;
 let systemAudioProducer;
 const consumers = new Map();
 let isAdmin = false;
+let currentQuality = 'auto';
+let videoConsumer = null;
 
 // ==================== INIT ====================
 
@@ -355,11 +358,22 @@ async function startStream() {
             videoTrack.contentHint = 'detail';
         }
 
+        // Generate simulcast encodings based on source resolution
+        const encodings = generateSimulcastEncodings(height, bitrate);
+
         videoProducer = await producerTransport.produce({
             track: videoTrack,
-            encodings: [{ maxBitrate: bitrate, networkPriority: 'high', priority: 'high' }],
-            codecOptions: { videoGoogleStartBitrate: bitrate / 2 }
+            encodings,
+            codecOptions: {
+                videoGoogleStartBitrate: bitrate / 3
+            },
+            appData: {
+                source: 'screen',
+                resolution: height
+            }
         });
+
+        console.log(`📡 Simulcast layers: ${encodings.length} (source: ${height}p)`);
 
         videoTrack.onended = stopStream;
 
@@ -378,6 +392,43 @@ async function startStream() {
         console.error('Stream error:', err);
         showToast('Yayın başlatılamadı: ' + err.message);
     }
+}
+
+function generateSimulcastEncodings(sourceHeight, maxBitrate) {
+    // Simulcast layers based on source resolution
+    const layers = [];
+
+    // High layer (source quality)
+    layers.push({
+        rid: 'h',
+        maxBitrate: maxBitrate,
+        scalabilityMode: 'L1T3',
+        scaleResolutionDownBy: 1.0
+    });
+
+    // Mid layer (proportional to source)
+    if (sourceHeight >= 720) {
+        const midScale = sourceHeight / 720;
+        layers.push({
+            rid: 'm',
+            maxBitrate: Math.floor(maxBitrate * 0.5),
+            scalabilityMode: 'L1T3',
+            scaleResolutionDownBy: midScale
+        });
+    }
+
+    // Low layer (proportional to source)
+    if (sourceHeight >= 480) {
+        const lowScale = sourceHeight / 480;
+        layers.push({
+            rid: 'l',
+            maxBitrate: Math.floor(maxBitrate * 0.25),
+            scalabilityMode: 'L1T3',
+            scaleResolutionDownBy: lowScale
+        });
+    }
+
+    return layers;
 }
 
 btnStopStream.addEventListener('click', stopStream);
@@ -558,6 +609,51 @@ socket.on('room-closed', ({ reason }) => {
     showToast(reason);
     setTimeout(() => window.location.href = 'index.html', 2000);
 });
+
+// ==================== QUALITY SELECTOR ====================
+
+if (qualitySelect) {
+    qualitySelect.addEventListener('change', async () => {
+        currentQuality = qualitySelect.value;
+        if (videoConsumer) {
+            await setConsumerQuality(videoConsumer, currentQuality);
+        }
+    });
+}
+
+async function setConsumerQuality(consumer, quality) {
+    if (!consumer || consumer.kind !== 'video') return;
+
+    let spatialLayer, temporalLayer;
+
+    switch (quality) {
+        case 'high':
+            spatialLayer = 2; // highest quality
+            temporalLayer = 2;
+            break;
+        case 'mid':
+            spatialLayer = 1; // medium quality
+            temporalLayer = 2;
+            break;
+        case 'low':
+            spatialLayer = 0; // lowest quality
+            temporalLayer = 2;
+            break;
+        case 'auto':
+        default:
+            // Let mediasoup decide automatically
+            spatialLayer = 2;
+            temporalLayer = 2;
+            break;
+    }
+
+    try {
+        await consumer.setPreferredLayers({ spatialLayer, temporalLayer });
+        console.log(`🎬 Quality set to: ${quality} (spatial: ${spatialLayer})`);
+    } catch (err) {
+        console.error('Failed to set quality:', err);
+    }
+}
 
 // ==================== HELPERS ====================
 
