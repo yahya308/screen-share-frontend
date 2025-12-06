@@ -158,20 +158,27 @@ class RoomManager {
         if (role === 'admin') {
             console.log(`⏳ Admin disconnected from room ${roomId}, waiting ${ADMIN_GRACE_PERIOD / 1000}s for reconnect...`);
 
-            // Set pending close timeout
-            const timeout = setTimeout(() => {
-                console.log(`⏰ Grace period expired for room ${roomId}, closing...`);
-                this.pendingClose.delete(roomId);
-                this.closeRoom(roomId);
-            }, ADMIN_GRACE_PERIOD);
-
-            this.pendingClose.set(roomId, timeout);
-
+            // Return immediately to signal grace period
             return { roomPending: true, roomId };
         }
 
         console.log(`👋 User ${socketId} left room ${roomId}`);
         return { roomId };
+    }
+
+    /**
+     * Start grace period timer (called from server.js)
+     */
+    startGracePeriod(roomId, callback) {
+        const timeout = setTimeout(() => {
+            console.log(`⏰ Grace period expired for room ${roomId}, closing...`);
+            this.pendingClose.delete(roomId);
+            this.closeRoom(roomId);
+            // Call callback to emit socket events
+            if (callback) callback(roomId);
+        }, ADMIN_GRACE_PERIOD);
+
+        this.pendingClose.set(roomId, timeout);
     }
 
     /**

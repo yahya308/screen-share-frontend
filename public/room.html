@@ -221,12 +221,34 @@
                 </div>
 
                 <div id="viewerInfo" class="bg-slate-800 rounded-xl p-4 border border-slate-700 hidden">
-                    <p class="text-slate-400 text-center">Yayını izliyorsunuz</p>
+                    <p class="text-slate-400 text-center mb-4">Yayını izliyorsunuz</p>
+                    <button id="btnLeaveRoom"
+                        class="w-full py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg text-sm transition-colors">
+                        Odadan Çık
+                    </button>
                 </div>
 
             </div>
         </div>
     </main>
+
+    <!-- Leave Confirmation Modal -->
+    <div id="leaveModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 border border-slate-700">
+            <h3 class="text-xl font-bold mb-2">Odadan Çık</h3>
+            <p class="text-slate-400 mb-6">Odadan çıkmak istiyor musunuz?</p>
+            <div class="flex gap-3">
+                <button id="btnCancelLeave"
+                    class="flex-1 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition-colors">
+                    Hayır
+                </button>
+                <button id="btnConfirmLeave"
+                    class="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-500 font-semibold transition-colors">
+                    Evet
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Password Modal -->
     <div id="passwordModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">

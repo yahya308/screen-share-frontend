@@ -51,6 +51,11 @@ const iconVolumeOff = document.getElementById('iconVolumeOff');
 const volumeSlider = document.getElementById('volumeSlider');
 const qualitySelect = document.getElementById('qualitySelect');
 const btnFullscreen = document.getElementById('btnFullscreen');
+const btnLeaveRoom = document.getElementById('btnLeaveRoom');
+
+const leaveModal = document.getElementById('leaveModal');
+const btnCancelLeave = document.getElementById('btnCancelLeave');
+const btnConfirmLeave = document.getElementById('btnConfirmLeave');
 
 const toast = document.getElementById('toast');
 const toastMessage = document.getElementById('toastMessage');
@@ -662,6 +667,28 @@ async function setConsumerQuality(consumer, quality) {
     } catch (err) {
         console.error('Failed to set quality:', err);
     }
+}
+
+// ==================== VIEWER LEAVE ====================
+
+if (btnLeaveRoom) {
+    btnLeaveRoom.addEventListener('click', () => {
+        leaveModal.classList.remove('hidden');
+        leaveModal.classList.add('flex');
+    });
+}
+
+if (btnCancelLeave) {
+    btnCancelLeave.addEventListener('click', () => {
+        leaveModal.classList.add('hidden');
+        leaveModal.classList.remove('flex');
+    });
+}
+
+if (btnConfirmLeave) {
+    btnConfirmLeave.addEventListener('click', () => {
+        window.location.href = 'index.html';
+    });
 }
 
 // ==================== HELPERS ====================

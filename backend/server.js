@@ -439,8 +439,12 @@ function handleLeaveRoom(socket) {
         io.to(result.roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
         io.emit('room-deleted', { id: result.roomId });
     } else if (result.roomPending) {
-        // Admin is reconnecting, don't emit user-left yet
-        // The room is waiting for admin to rejoin
+        // Admin is disconnecting, start grace period
+        roomManager.startGracePeriod(result.roomId, (roomId) => {
+            // Grace period expired, emit events
+            io.to(roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
+            io.emit('room-deleted', { id: roomId });
+        });
     } else {
         socket.to(result.roomId).emit('user-left', {
             userCount: roomManager.getRoomUserCount(result.roomId)
