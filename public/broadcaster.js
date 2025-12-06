@@ -34,6 +34,38 @@ let videoProducer;
 let micProducer;
 let systemAudioProducer;
 
+// Simulcast encoding configuration based on source resolution
+function generateSimulcastEncodings(sourceHeight, maxBitrate) {
+    // Define available quality levels
+    const qualityLevels = [
+        { height: 1080, bitrate: 2500000, label: '1080p' },
+        { height: 720, bitrate: 1500000, label: '720p' },
+        { height: 480, bitrate: 800000, label: '480p' },
+        { height: 360, bitrate: 400000, label: '360p' },
+        { height: 240, bitrate: 200000, label: '240p' },
+        { height: 144, bitrate: 100000, label: '144p' }
+    ];
+
+    // Filter levels that are <= source resolution
+    const availableLevels = qualityLevels.filter(q => q.height <= sourceHeight);
+
+    // Take up to 4 layers (simulcast typically supports 3-4)
+    const selectedLevels = availableLevels.slice(0, 4);
+
+    // Generate encodings from lowest to highest (mediasoup convention)
+    const encodings = selectedLevels.reverse().map((level, index) => {
+        const scaleDown = sourceHeight / level.height;
+        return {
+            rid: `r${index}`,
+            maxBitrate: Math.min(level.bitrate, maxBitrate),
+            scaleResolutionDownBy: scaleDown
+        };
+    });
+
+    console.log('Simulcast encodings generated:', encodings);
+    return encodings;
+}
+
 btnStart.addEventListener('click', startShare);
 btnStop.addEventListener('click', () => stopShare("Stop Button Clicked"));
 btnToggleMic.addEventListener('click', toggleMic);
@@ -110,11 +142,26 @@ async function startShare() {
 
                 localVideo.srcObject = stream;
 
-                // Video Track (Simple encoding - temporarily reverted)
+                // Video Track with Simulcast Encodings
                 const videoTrack = stream.getVideoTracks()[0];
+
+                // Generate simulcast encodings based on source resolution
+                const simulcastEncodings = generateSimulcastEncodings(height, bitrate);
+
                 videoProducer = await producerTransport.produce({
                     track: videoTrack,
-                    encodings: [{ maxBitrate: bitrate }]
+                    encodings: simulcastEncodings,
+                    codecOptions: {
+                        videoGoogleStartBitrate: 1000
+                    }
+                });
+
+                // Send stream info to server for viewers
+                socket.emit('broadcaster-settings', {
+                    resolution: height,
+                    fps: fps,
+                    maxBitrate: bitrate,
+                    layerCount: simulcastEncodings.length
                 });
 
                 videoTrack.onended = () => stopShare("Video Track Ended (Browser UI)");

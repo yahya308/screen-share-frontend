@@ -48,12 +48,15 @@ let worker;
 let router;
 // let producer; // REMOVED: Single producer is not enough
 const producers = new Map(); // Store all producers: producer.id -> producer
-let consumer;
+const consumers = new Map(); // Store all consumers: consumer.id -> { consumer, socketId }
 // We need to store transports to find them later
 const transports = [];
 
 // ⭐ Track broadcasters to exclude them from viewer count
 const broadcasters = new Set(); // socketId
+
+// ⭐ Store broadcaster settings for simulcast
+let broadcasterSettings = null;
 
 // --- Mediasoup Worker & Router ---
 async function startMediasoup() {
@@ -202,13 +205,18 @@ io.on('connection', async (socket) => {
                 paused: true,
             });
 
+            // Store consumer for layer switching
+            consumers.set(consumer.id, { consumer, socketId: socket.id });
+
             consumer.on('transportclose', () => {
                 console.log('Consumer transport closed');
+                consumers.delete(consumer.id);
             });
 
             consumer.on('producerclose', () => {
                 console.log('Producer closed');
                 socket.emit('producer-closed', { remoteProducerId: producer.id });
+                consumers.delete(consumer.id);
                 consumer.close();
             });
 
@@ -217,6 +225,7 @@ io.on('connection', async (socket) => {
                 producerId: producer.id,
                 kind: consumer.kind,
                 rtpParameters: consumer.rtpParameters,
+                broadcasterSettings: broadcasterSettings, // Send broadcaster info for quality options
             };
 
             callback({ params });
@@ -238,6 +247,39 @@ io.on('connection', async (socket) => {
     socket.on('getProducers', (callback) => {
         // Return array of producer IDs
         callback(Array.from(producers.keys()));
+    });
+
+    // ⭐ Broadcaster settings for simulcast quality info
+    socket.on('broadcaster-settings', (settings) => {
+        console.log('📺 Broadcaster settings received:', settings);
+        broadcasterSettings = settings;
+        // Notify all viewers about stream info
+        socket.broadcast.emit('stream-info', settings);
+    });
+
+    // ⭐ Set preferred layers for quality switching
+    socket.on('set-preferred-layers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
+        try {
+            const entry = consumers.get(consumerId);
+            if (entry && entry.consumer) {
+                await entry.consumer.setPreferredLayers({
+                    spatialLayer: spatialLayer,
+                    temporalLayer: temporalLayer || 0
+                });
+                console.log(`🎚️ Layer changed for consumer ${consumerId}: spatial=${spatialLayer}`);
+                if (callback) callback({ success: true });
+            } else {
+                if (callback) callback({ success: false, error: 'Consumer not found' });
+            }
+        } catch (error) {
+            console.error('Set preferred layers error:', error);
+            if (callback) callback({ success: false, error: error.message });
+        }
+    });
+
+    // ⭐ Get current stream info (for late-joining viewers)
+    socket.on('get-stream-info', (callback) => {
+        callback(broadcasterSettings);
     });
 
     // Viewer Count: Handle request for current viewer count
