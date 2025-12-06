@@ -9,8 +9,6 @@ services:
     network_mode: host
     environment:
       - NODE_ENV=production
-    volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro
 
   # Nginx Reverse Proxy with SSL
   nginx:
