@@ -50,6 +50,30 @@ const io = new Server(server, {
 const workerManager = new WorkerManager();
 let roomManager;
 
+// ==================== HEALTH CHECK ENDPOINTS ====================
+
+// Root endpoint for health check
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        service: 'VELOSTREAM',
+        version: '1.0.0',
+        uptime: Math.floor(process.uptime())
+    });
+});
+
+// Detailed health endpoint
+app.get('/health', (req, res) => {
+    const workers = workerManager?.workers?.length || 0;
+    res.status(200).json({
+        status: 'healthy',
+        workers: workers,
+        uptime: Math.floor(process.uptime()),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+    });
+});
+
 // ==================== SOCKET HANDLERS ====================
 
 io.on('connection', (socket) => {
