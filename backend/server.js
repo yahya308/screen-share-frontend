@@ -103,6 +103,9 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Cancel any pending room close
+        roomManager.cancelPendingClose(roomId);
+
         // Update admin socket ID
         database.updateAdminSocket(roomId, socket.id);
         roomManager.socketRooms.set(socket.id, { roomId, role: 'admin' });

@@ -8,6 +8,8 @@ const database = require('./database');
 const MAX_ROOMS = 50;
 const PIPE_THRESHOLD = 100; // Users per worker before PipeTransport
 
+const ADMIN_GRACE_PERIOD = 5000; // 5 seconds for admin to reconnect
+
 class RoomManager {
     constructor(workerManager) {
         this.workerManager = workerManager;
@@ -15,6 +17,8 @@ class RoomManager {
         this.rooms = new Map();
         // socketId -> { roomId, role }
         this.socketRooms = new Map();
+        // roomId -> timeout (for admin disconnect grace period)
+        this.pendingClose = new Map();
     }
 
     // ==================== ROOM CRUD ====================
@@ -146,14 +150,38 @@ class RoomManager {
             }
         }
 
-        // If admin left, close the room
+        // If admin left, start grace period (don't close immediately)
         if (role === 'admin') {
-            this.closeRoom(roomId);
-            return { roomClosed: true, roomId };
+            console.log(`⏳ Admin disconnected from room ${roomId}, waiting ${ADMIN_GRACE_PERIOD / 1000}s for reconnect...`);
+
+            // Set pending close timeout
+            const timeout = setTimeout(() => {
+                console.log(`⏰ Grace period expired for room ${roomId}, closing...`);
+                this.pendingClose.delete(roomId);
+                this.closeRoom(roomId);
+            }, ADMIN_GRACE_PERIOD);
+
+            this.pendingClose.set(roomId, timeout);
+
+            return { roomPending: true, roomId };
         }
 
         console.log(`👋 User ${socketId} left room ${roomId}`);
         return { roomId };
+    }
+
+    /**
+     * Cancel pending close (admin reconnected)
+     */
+    cancelPendingClose(roomId) {
+        const timeout = this.pendingClose.get(roomId);
+        if (timeout) {
+            clearTimeout(timeout);
+            this.pendingClose.delete(roomId);
+            console.log(`✅ Admin reconnected, cancelled pending close for room ${roomId}`);
+            return true;
+        }
+        return false;
     }
 
     /**
