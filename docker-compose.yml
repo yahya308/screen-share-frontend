@@ -1,40 +1,30 @@
-version: '3.8'
-
 services:
-  # Mediasoup Backend
+  # Mediasoup Backend - Uses host network for WebRTC UDP ports
   mediasoup:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: mediasoup-backend
     restart: unless-stopped
+    network_mode: host
     environment:
       - NODE_ENV=production
     volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro  # SSL certificates
-    ports:
-      - "3000:3000"           # HTTP/WebSocket (internal, proxied by nginx)
-      - "40000-49999:40000-49999/udp"  # WebRTC UDP ports
-    networks:
-      - webrtc-network
+      - /etc/letsencrypt:/etc/letsencrypt:ro
 
   # Nginx Reverse Proxy with SSL
   nginx:
     image: nginx:alpine
     container_name: nginx-proxy
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
+    network_mode: host
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
-      - ./nginx/webroot:/var/www/certbot:ro  # For certbot challenges
+      - ./nginx/webroot:/var/www/certbot:ro
     depends_on:
       - mediasoup
-    networks:
-      - webrtc-network
 
   # Certbot for SSL certificate management
   certbot:
@@ -44,9 +34,3 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt
       - ./nginx/webroot:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-    networks:
-      - webrtc-network
-
-networks:
-  webrtc-network:
-    driver: bridge
