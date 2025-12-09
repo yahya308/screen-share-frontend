@@ -342,6 +342,13 @@ io.on('connection', (socket) => {
 
             workerManager.incrementProducers(socketData.roomState.workerIndex);
 
+            // ⭐ Producer score monitoring for network quality
+            producer.on('score', (score) => {
+                if (score[0]?.score < 5) {
+                    console.warn(`⚠️ Low producer score: ${score[0]?.score} - network issues detected`);
+                }
+            });
+
             // Set streaming status
             if (kind === 'video') {
                 roomManager.setStreamingStatus(socketData.roomId, true);
@@ -402,6 +409,11 @@ io.on('connection', (socket) => {
                 rtpCapabilities,
                 paused: true
             });
+
+            // ⭐ Set max priority for video consumers
+            if (consumer.kind === 'video') {
+                await consumer.setPriority(255); // Max priority
+            }
 
             // Store consumer by consumer.id (not socket.id) to support multiple consumers per viewer
             roomState.consumers.set(consumer.id, { consumer, socketId: socket.id });

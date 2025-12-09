@@ -324,6 +324,25 @@ async function consumeProducer(producerId) {
             setTimeout(() => {
                 setConsumerQuality(consumer, currentQuality === 'auto' ? 'high' : currentQuality);
             }, 500); // Small delay to ensure consumer is fully set up
+
+            // ⭐ Jitter Buffer Target - Lower latency (100ms instead of ~150ms default)
+            try {
+                const receivers = consumerTransport.handler._pc.getReceivers();
+                const videoReceiver = receivers.find(r => r.track?.kind === 'video');
+                if (videoReceiver && 'jitterBufferTarget' in videoReceiver) {
+                    videoReceiver.jitterBufferTarget = 100; // 100ms target
+                    console.log('📉 Jitter buffer target set to 100ms');
+                }
+            } catch (e) {
+                console.log('Jitter buffer optimization not available');
+            }
+
+            // ⭐ Periodic keyframe request every 10 seconds (prevent stale decoder)
+            setInterval(() => {
+                if (videoConsumer && !videoConsumer.closed) {
+                    socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
+                }
+            }, 10000);
         }
 
         if (remoteVideo.srcObject) {
