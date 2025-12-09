@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -36,6 +38,16 @@ const io = socketIo(server, {
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Upload speed test endpoint (accepts raw bytes and responds with size)
+app.post('/upload-test', express.raw({ type: '*/*', limit: '200mb' }), (req, res) => {
+  try {
+    const receivedBytes = req.body ? req.body.length || 0 : 0;
+    res.json({ receivedBytes, timestamp: Date.now() });
+  } catch (e) {
+    res.status(400).json({ error: 'Invalid body' });
+  }
+});
+
 // Routes
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'broadcaster.html'));
@@ -47,6 +59,85 @@ app.get('/watch', (req, res) => {
 
 app.get('/test', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'test.html'));
+});
+
+app.get('/test-turn', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'test-turn.html'));
+});
+
+// Dynamic ICE config endpoint (supports STUN-only, static TURN, or ephemeral TURN)
+app.get('/ice-config', (req, res) => {
+  try {
+    // Always include a baseline set of STUN servers
+    const stunServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
+    ];
+
+    const iceServers = [...stunServers];
+
+    const turnHost = process.env.TURN_HOST; // e.g., turn.example.com or 1.2.3.4
+    const turnPort = process.env.TURN_PORT || '3478';
+    const turnTlsPort = process.env.TURN_TLS_PORT || '5349';
+    const turnTlsEnabled = ((process.env.TURN_ENABLE_TLS || '').toLowerCase() === 'true') || Boolean(process.env.TURN_TLS_PORT);
+    const turnTransports = (process.env.TURN_TRANSPORTS || 'udp,tcp')
+      .split(',')
+      .map(t => t.trim().toLowerCase())
+      .filter(Boolean);
+
+    const turnUsername = process.env.TURN_USERNAME;
+    const turnPassword = process.env.TURN_PASSWORD;
+
+    const turnSecret = process.env.TURN_SECRET; // coturn static-auth-secret (for REST/ephemeral creds)
+    const turnRealm = process.env.TURN_REALM || 'realm';
+
+    const pushTurnServers = (username, credential) => {
+      turnTransports.forEach(transport => {
+        iceServers.push({
+          urls: `turn:${turnHost}:${turnPort}?transport=${transport}`,
+          username,
+          credential,
+          realm: turnRealm
+        });
+      });
+
+      if (turnTlsEnabled) {
+        iceServers.push({
+          urls: `turns:${turnHost}:${turnTlsPort}?transport=tcp`,
+          username,
+          credential,
+          realm: turnRealm
+        });
+      }
+    };
+
+    if (turnHost) {
+      if (turnSecret) {
+        // Ephemeral credentials (valid for ~1 hour)
+        const ttlSeconds = parseInt(process.env.TURN_TTL_SECONDS || '3600', 10);
+        const username = `${Math.floor(Date.now() / 1000) + ttlSeconds}:user`;
+        const hmac = crypto.createHmac('sha1', turnSecret).update(username).digest('base64');
+        pushTurnServers(username, hmac);
+      } else if (turnUsername && turnPassword) {
+        // Static credentials
+        pushTurnServers(turnUsername, turnPassword);
+      }
+    }
+
+    return res.json({ iceServers, iceCandidatePoolSize: 10 });
+  } catch (e) {
+    console.error('Error building ICE config:', e);
+    // Fallback to STUN-only if something goes wrong
+    return res.json({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: 10
+    });
+  }
 });
 
 // Health check endpoint
@@ -91,6 +182,12 @@ io.on('connection', (socket) => {
     isMobile: isMobile,
     isSamsung: isSamsung
   });
+
+  // If a broadcaster is already active, inform this newly connected client
+  // so that late viewers can immediately emit their 'viewer' event.
+  if (broadcasterCount > 0) {
+    socket.emit('broadcaster');
+  }
 
   // Handle broadcaster joining
   socket.on('broadcaster', () => {
@@ -195,8 +292,8 @@ io.on('connection', (socket) => {
 
         console.log(`Offer received from ${socket.id}, SDP length: ${offer.sdp.length}`);
 
-        // Codec preference: H264 > VP9 > VP8
-        offer.sdp = preferCodecs(offer.sdp, ['H264', 'VP9', 'VP8']);
+        // Codec preference (Android-friendly): VP8 > H264 > VP9
+        offer.sdp = preferCodecs(offer.sdp, ['VP8', 'H264', 'VP9']);
 
         // Mobile-specific SDP optimization (ekstra manipülasyonlar istenirse buraya eklenebilir)
         const connection = activeConnections.get(socket.id);
@@ -243,8 +340,8 @@ io.on('connection', (socket) => {
 
       console.log(`Answer received from ${socket.id}, SDP length: ${answer.sdp.length}`);
 
-      // Codec preference: H264 > VP9 > VP8
-      answer.sdp = preferCodecs(answer.sdp, ['H264', 'VP9', 'VP8']);
+      // Codec preference (Android-friendly): VP8 > H264 > VP9
+      answer.sdp = preferCodecs(answer.sdp, ['VP8', 'H264', 'VP9']);
 
       // Mobile-specific SDP optimization (ekstra manipülasyonlar istenirse buraya eklenebilir)
       const connection = activeConnections.get(socket.id);
