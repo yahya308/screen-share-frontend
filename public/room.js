@@ -485,6 +485,7 @@ async function startStream() {
             }
         });
 
+        console.log(`✅ Video producer created: ${videoProducer.id}`);
         console.log(`📡 VP9 SVC mode: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps (L1T3)`);
 
         videoTrack.onended = stopStream;
@@ -492,8 +493,12 @@ async function startStream() {
         // System audio
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
+            console.log('🔊 System audio track captured:', audioTrack.id);
             systemAudioProducer = await producerTransport.produce({ track: audioTrack });
+            console.log('✅ System audio producer created:', systemAudioProducer.id);
             btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
+        } else {
+            console.warn('❌ No system audio track captured! User may not have selected "Share tab audio"');
         }
 
         btnStartStream.classList.add('hidden');
@@ -587,9 +592,12 @@ btnToggleMic.addEventListener('click', async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const track = stream.getAudioTracks()[0];
+            console.log('🎤 Microphone track captured:', track.id);
             micProducer = await producerTransport.produce({ track });
+            console.log('✅ Microphone producer created:', micProducer.id);
             btnToggleMic.textContent = '🎤 Mikrofon (Açık)';
         } catch (err) {
+            console.error('❌ Microphone access failed:', err);
             showToast('Mikrofon erişimi başarısız');
         }
     }
