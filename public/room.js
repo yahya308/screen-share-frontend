@@ -379,9 +379,14 @@ async function consumeProducer(producerId) {
         // Resume consumer with the consumer ID
         socket.emit('resume', { consumerId: consumer.id });
 
-        // ⭐ Auto-play for ALL tracks (video and audio)
-        // This ensures audio tracks also start playing when added
-        autoPlayVideo();
+        // ⭐ Auto-play when video data is ready (prevents race condition)
+        // Only set up listener on first track to avoid multiple play attempts
+        if (remoteVideo.srcObject.getTracks().length === 1) {
+            remoteVideo.addEventListener('loadeddata', () => {
+                console.log('📺 Video data loaded, starting playback');
+                autoPlayVideo();
+            }, { once: true }); // Only trigger once
+        }
     });
 }
 
