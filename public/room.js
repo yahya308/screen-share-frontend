@@ -379,7 +379,8 @@ async function consumeProducer(producerId) {
         // Resume consumer with the consumer ID
         socket.emit('resume', { consumerId: consumer.id });
 
-        // ⭐ Auto-play with retry and proper icon state
+        // ⭐ Auto-play for ALL tracks (video and audio)
+        // This ensures audio tracks also start playing when added
         autoPlayVideo();
     });
 }
