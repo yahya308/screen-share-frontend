@@ -337,12 +337,12 @@ async function consumeProducer(producerId) {
                 console.log('Jitter buffer optimization not available');
             }
 
-            // ⭐ Periodic keyframe request every 10 seconds (prevent stale decoder)
+            // ⭐ Periodic keyframe request every 30 seconds (prevent stale decoder)
             setInterval(() => {
                 if (videoConsumer && !videoConsumer.closed) {
                     socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
                 }
-            }, 10000);
+            }, 30000);
         }
 
         if (remoteVideo.srcObject) {
@@ -380,12 +380,13 @@ async function consumeProducer(producerId) {
         socket.emit('resume', { consumerId: consumer.id });
 
         // ⭐ Auto-play when video data is ready (prevents race condition)
-        // Only set up listener on first track to avoid multiple play attempts
-        if (remoteVideo.srcObject.getTracks().length === 1) {
+        // Only set up listener for FIRST VIDEO consumer (not audio!)
+        if (params.kind === 'video' && !videoConsumer.previousVideoConsumer) {
             remoteVideo.addEventListener('loadeddata', () => {
                 console.log('📺 Video data loaded, starting playback');
                 autoPlayVideo();
             }, { once: true }); // Only trigger once
+            videoConsumer.previousVideoConsumer = true; // Mark that we set up listener
         }
     });
 }
@@ -432,6 +433,26 @@ btnStartStream.addEventListener('click', async () => {
 });
 
 async function startStream() {
+    // ⭐ Close existing producers if any (prevent duplicates)
+    if (videoProducer) {
+        console.log('🗑️ Closing existing video producer');
+        socket.emit('producer-closing', { producerId: videoProducer.id });
+        videoProducer.close();
+        videoProducer = null;
+    }
+    if (systemAudioProducer) {
+        console.log('🗑️ Closing existing audio producer');
+        socket.emit('producer-closing', { producerId: systemAudioProducer.id });
+        systemAudioProducer.close();
+        systemAudioProducer = null;
+    }
+    if (micProducer) {
+        console.log('🗑️ Closing existing mic producer');
+        socket.emit('producer-closing', { producerId: micProducer.id });
+        micProducer.close();
+        micProducer = null;
+    }
+
     const height = parseInt(resSelect.value);
     const fps = parseInt(fpsSelect.value);
     const bitrate = parseInt(bitrateInput.value) * 1000;
