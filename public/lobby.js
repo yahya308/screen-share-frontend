@@ -2,7 +2,45 @@
  * Lobby - Room list and creation
  */
 
-const socket = io('https://yahya-oracle.duckdns.org');
+let socket;
+
+async function getConfig() {
+    try {
+        const response = await fetch('/api/config', { cache: 'no-store' });
+        if (!response.ok) return {};
+        return await response.json();
+    } catch (e) {
+        return {};
+    }
+}
+
+async function initSocket() {
+    const config = await getConfig();
+    const signalingUrl = config.signalingUrl || window.location.origin;
+
+    socket = io(signalingUrl);
+
+    socket.on('connect', () => {
+        console.log('Connected to server');
+        loadRooms();
+    });
+
+    // Real-time room updates
+    socket.on('room-created', (room) => {
+        console.log('Room created:', room);
+        loadRooms();
+    });
+
+    socket.on('room-updated', (update) => {
+        console.log('Room updated:', update);
+        loadRooms();
+    });
+
+    socket.on('room-deleted', ({ id }) => {
+        console.log('Room deleted:', id);
+        loadRooms();
+    });
+}
 
 // DOM Elements
 const roomList = document.getElementById('roomList');
@@ -198,27 +236,6 @@ function closePasswordModal() {
     pendingRoomId = null;
 }
 
-// ==================== SOCKET EVENTS ====================
-
-socket.on('room-created', (room) => {
-    loadRooms();
-});
-
-socket.on('room-updated', ({ id, userCount }) => {
-    const card = document.querySelector(`[data-room-id="${id}"]`);
-    if (card) {
-        const countEl = card.querySelector('.text-slate-400 span');
-        if (countEl) {
-            const maxUsers = countEl.textContent.split('/')[1];
-            countEl.textContent = `${userCount}/${maxUsers}`;
-        }
-    }
-});
-
-socket.on('room-deleted', ({ id }) => {
-    loadRooms();
-});
-
 // ==================== HELPERS ====================
 
 function showToast(message, duration = 3000) {
@@ -235,23 +252,4 @@ function escapeHtml(text) {
 
 // ==================== INIT ====================
 
-socket.on('connect', () => {
-    console.log('Connected to server');
-    loadRooms();
-});
-
-// Real-time room updates
-socket.on('room-created', (room) => {
-    console.log('Room created:', room);
-    loadRooms(); // Refresh the entire list
-});
-
-socket.on('room-updated', (update) => {
-    console.log('Room updated:', update);
-    loadRooms(); // Refresh to show updated user count
-});
-
-socket.on('room-deleted', ({ id }) => {
-    console.log('Room deleted:', id);
-    loadRooms(); // Refresh to remove deleted room
-});
+initSocket();

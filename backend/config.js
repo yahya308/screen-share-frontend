@@ -1,6 +1,8 @@
+const announcedIp = process.env.ANNOUNCED_IP || '130.61.104.4';
+
 module.exports = {
     // Public IP of the server (Oracle Cloud)
-    announcedIp: '130.61.104.4',
+    announcedIp,
 
     // Port to listen on
     port: 3000,
@@ -89,7 +91,7 @@ module.exports = {
             listenIps: [
                 {
                     ip: '0.0.0.0',
-                    announcedIp: '130.61.104.4'
+                    announcedIp
                 }
             ],
             maxIncomingBitrate: 50000000, // 50 Mbps for high quality

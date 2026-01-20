@@ -4,7 +4,99 @@
 
 import { Device } from 'mediasoup-client';
 
-const socket = io('https://yahya-oracle.duckdns.org');
+let socket;
+
+async function getConfig() {
+    try {
+        const response = await fetch('/api/config', { cache: 'no-store' });
+        if (!response.ok) return {};
+        return await response.json();
+    } catch (e) {
+        return {};
+    }
+}
+
+function registerSocketEvents() {
+    socket.on('user-joined', ({ userCount: count }) => {
+        userCount.textContent = count;
+    });
+
+    socket.on('user-left', ({ userCount: count }) => {
+        userCount.textContent = count;
+    });
+
+    socket.on('new-producer', (producerId) => {
+        consumeProducer(producerId);
+    });
+
+    socket.on('stream-started', () => {
+        waitingOverlay.classList.add('hidden');
+        pausedOverlay.classList.add('hidden');
+        if (!device) {
+            initMediasoup();
+        } else {
+            getProducers();
+        }
+    });
+
+    socket.on('stream-paused', () => {
+        pausedOverlay.classList.remove('hidden');
+    });
+
+    socket.on('producer-closed', ({ remoteProducerId }) => {
+        for (const [id, consumer] of consumers) {
+            if (consumer.producerId === remoteProducerId) {
+                consumer.close();
+                consumers.delete(id);
+                if (remoteVideo.srcObject) {
+                    remoteVideo.srcObject.removeTrack(consumer.track);
+                }
+            }
+        }
+    });
+
+    socket.on('room-closed', ({ reason }) => {
+        showToast(reason);
+        setTimeout(() => window.location.href = 'index.html', 2000);
+    });
+}
+
+async function initSocket() {
+    const config = await getConfig();
+    const signalingUrl = config.signalingUrl || window.location.origin;
+
+    socket = io(signalingUrl);
+    registerSocketEvents();
+
+    socket.on('connect', () => {
+        console.log('Connected to server');
+
+        if (isAdminMode) {
+            // Admin rejoining after redirect from lobby
+            socket.emit('admin-rejoin', { roomId }, (result) => {
+                if (result.error) {
+                    showToast(result.error);
+                    setTimeout(() => window.location.href = 'index.html', 2000);
+                    return;
+                }
+
+                roomName.textContent = result.roomName;
+                userCount.textContent = result.userCount || 1;
+                maxUsersInput.value = result.maxUsers || 100;
+
+                isAdmin = true;
+                setupAdminUI();
+                initMediasoup();
+            });
+        } else {
+            // Try to get stored password from lobby
+            const storedPassword = sessionStorage.getItem(`room_password_${roomId}`);
+
+            // Join room as viewer
+            attemptJoinRoom(storedPassword);
+        }
+    });
+}
 
 // Get room ID from URL
 const urlParams = new URLSearchParams(window.location.search);
@@ -74,34 +166,7 @@ let videoConsumer = null;
 
 // ==================== INIT ====================
 
-socket.on('connect', () => {
-    console.log('Connected to server');
-
-    if (isAdminMode) {
-        // Admin rejoining after redirect from lobby
-        socket.emit('admin-rejoin', { roomId }, (result) => {
-            if (result.error) {
-                showToast(result.error);
-                setTimeout(() => window.location.href = 'index.html', 2000);
-                return;
-            }
-
-            roomName.textContent = result.roomName;
-            userCount.textContent = result.userCount || 1;
-            maxUsersInput.value = result.maxUsers || 100;
-
-            isAdmin = true;
-            setupAdminUI();
-            initMediasoup();
-        });
-    } else {
-        // Try to get stored password from lobby
-        const storedPassword = sessionStorage.getItem(`room_password_${roomId}`);
-
-        // Join room as viewer
-        attemptJoinRoom(storedPassword);
-    }
-});
+initSocket();
 
 function attemptJoinRoom(password) {
     socket.emit('join-room', { roomId, password }, (result) => {
@@ -716,60 +781,6 @@ btnInvite.addEventListener('click', () => {
     navigator.clipboard.writeText(url).then(() => {
         showToast('Davet linki kopyalandı', 'success');
     });
-});
-
-// ==================== SOCKET EVENTS ====================
-
-socket.on('user-joined', ({ userCount: count }) => {
-    userCount.textContent = count;
-});
-
-socket.on('user-left', ({ userCount: count }) => {
-    userCount.textContent = count;
-});
-
-socket.on('new-producer', (producerId) => {
-    consumeProducer(producerId);
-});
-
-socket.on('stream-started', () => {
-    waitingOverlay.classList.add('hidden');
-    pausedOverlay.classList.add('hidden');
-    if (!device) {
-        initMediasoup();
-    } else {
-        getProducers();
-    }
-});
-
-socket.on('stream-paused', () => {
-    pausedOverlay.classList.remove('hidden');
-});
-
-socket.on('producer-closed', ({ remoteProducerId }) => {
-    for (const [id, consumer] of consumers) {
-        if (consumer.producerId === remoteProducerId) {
-            consumer.close();
-            consumers.delete(id);
-            if (remoteVideo.srcObject) {
-                remoteVideo.srcObject.removeTrack(consumer.track);
-            }
-        }
-    }
-});
-
-// Real-time user count updates
-socket.on('user-joined', ({ userCount: count }) => {
-    userCount.textContent = count;
-});
-
-socket.on('user-left', ({ userCount: count }) => {
-    userCount.textContent = count;
-});
-
-socket.on('room-closed', ({ reason }) => {
-    showToast(reason);
-    setTimeout(() => window.location.href = 'index.html', 2000);
 });
 
 // ==================== QUALITY SELECTOR ====================

@@ -5,16 +5,29 @@ const socketIo = require('socket.io');
 const path = require('path');
 const crypto = require('crypto');
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = allowedOrigins.length
+  ? {
+      origin: allowedOrigins,
+      methods: ['GET', 'POST'],
+      credentials: true
+    }
+  : {
+      origin: '*',
+      methods: ['GET', 'POST'],
+      credentials: true
+    };
+
 const app = express();
 const server = http.createServer(app);
 
 // Enhanced Socket.IO configuration for Vercel compatibility and mobile optimization
 const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
+  cors: corsOptions,
   transports: ['polling', 'websocket'],
   pingTimeout: 60000,
   pingInterval: 25000,

@@ -15,8 +15,24 @@ const RoomManager = require('./RoomManager');
 const database = require('./database');
 const rateLimiter = require('./RateLimiter');
 
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+
+const corsOptions = allowedOrigins.length
+    ? {
+        origin: allowedOrigins,
+        methods: ['GET', 'POST'],
+        credentials: true
+    }
+    : {
+        origin: '*',
+        methods: ['GET', 'POST']
+    };
+
 const app = express();
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.static('../public'));
 
 // ==================== SERVER SETUP ====================
@@ -39,10 +55,7 @@ if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
 }
 
 const io = new Server(server, {
-    cors: {
-        origin: '*',
-        methods: ['GET', 'POST']
-    }
+    cors: corsOptions
 });
 
 // ==================== MANAGERS ====================
