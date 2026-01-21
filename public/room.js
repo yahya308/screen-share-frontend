@@ -144,6 +144,14 @@ const volumeSlider = document.getElementById('volumeSlider');
 const qualitySelect = document.getElementById('qualitySelect');
 const btnFullscreen = document.getElementById('btnFullscreen');
 const btnLeaveRoom = document.getElementById('btnLeaveRoom');
+const btnStats = document.getElementById('btnStats');
+
+const statsPanel = document.getElementById('statsPanel');
+const statsBitrate = document.getElementById('statsBitrate');
+const statsFps = document.getElementById('statsFps');
+const statsRtt = document.getElementById('statsRtt');
+const statsLoss = document.getElementById('statsLoss');
+const statsJitter = document.getElementById('statsJitter');
 
 const leaveModal = document.getElementById('leaveModal');
 const btnCancelLeave = document.getElementById('btnCancelLeave');
@@ -167,6 +175,10 @@ const consumers = new Map();
 let isAdmin = false;
 let currentQuality = 'auto';
 let videoConsumer = null;
+const iceRestartState = new WeakMap();
+let statsInterval = null;
+let lastStats = { timestamp: 0, bytes: 0 };
+let statsStarted = false;
 
 function pickVideoCodec(preferSimulcast) {
     const codecs = device?.rtpCapabilities?.codecs || [];
@@ -325,6 +337,7 @@ function createSendTransport() {
         }
 
         producerTransport = device.createSendTransport(params);
+        attachTransportHandlers(producerTransport);
 
         producerTransport.on('connect', ({ dtlsParameters }, callback) => {
             socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters });
@@ -353,6 +366,7 @@ function createRecvTransport() {
         }
 
         consumerTransport = device.createRecvTransport(params);
+        attachTransportHandlers(consumerTransport);
 
         consumerTransport.on('connect', ({ dtlsParameters }, callback) => {
             socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters });
@@ -361,6 +375,42 @@ function createRecvTransport() {
 
         // Transport ready, now get producers
         getProducers();
+    });
+}
+
+function attachTransportHandlers(transport) {
+    transport.on('connectionstatechange', (state) => {
+        if (state === 'failed' || state === 'disconnected') {
+            attemptIceRestart(transport);
+        }
+    });
+}
+
+function attemptIceRestart(transport) {
+    if (!transport || transport.closed) return;
+
+    const state = iceRestartState.get(transport) || { inProgress: false, lastAttempt: 0 };
+    const now = Date.now();
+    if (state.inProgress || now - state.lastAttempt < 5000) return;
+
+    state.inProgress = true;
+    state.lastAttempt = now;
+    iceRestartState.set(transport, state);
+
+    socket.emit('restartIce', { transportId: transport.id }, async ({ iceParameters, error }) => {
+        try {
+            if (error) {
+                console.warn(`⚠️ ICE restart error: ${error}`);
+                return;
+            }
+            await transport.restartIce({ iceParameters });
+            console.log('🔄 ICE restart completed');
+        } catch (e) {
+            console.warn(`⚠️ ICE restart failed: ${e.message}`);
+        } finally {
+            state.inProgress = false;
+            iceRestartState.set(transport, state);
+        }
     });
 }
 
@@ -401,6 +451,10 @@ async function consumeProducer(producerId) {
         // Save video consumer for quality control
         if (params.kind === 'video') {
             videoConsumer = consumer;
+            if (!statsStarted) {
+                startStatsLoop(false);
+                statsStarted = true;
+            }
             // Use auto/manual quality after consumer is ready
             setTimeout(() => {
                 setConsumerQuality(consumer, currentQuality);
@@ -470,6 +524,65 @@ async function consumeProducer(producerId) {
             videoConsumer.previousVideoConsumer = true; // Mark that we set up listener
         }
     });
+}
+
+function startStatsLoop(isSender) {
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+
+    const pc = isSender
+        ? producerTransport?.handler?._pc
+        : consumerTransport?.handler?._pc;
+
+    if (!pc) return;
+
+    statsInterval = setInterval(async () => {
+        try {
+            const stats = await pc.getStats();
+            let bytes = 0;
+            let fps = 0;
+            let packetsLost = 0;
+            let packetsTotal = 0;
+            let jitter = 0;
+            let rtt = 0;
+
+            stats.forEach((report) => {
+                if (report.type === (isSender ? 'outbound-rtp' : 'inbound-rtp') && report.kind === 'video') {
+                    bytes = report.bytesSent || report.bytesReceived || bytes;
+                    fps = report.framesPerSecond || fps;
+                    packetsLost = report.packetsLost || packetsLost;
+                    packetsTotal = (report.packetsLost || 0) + (report.packetsReceived || 0);
+                    jitter = report.jitter || jitter;
+                }
+
+                if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime) {
+                    rtt = report.currentRoundTripTime;
+                }
+            });
+
+            const now = Date.now();
+            let bitrateKbps = 0;
+            if (lastStats.timestamp) {
+                const deltaMs = now - lastStats.timestamp;
+                const deltaBytes = bytes - lastStats.bytes;
+                if (deltaMs > 0) {
+                    bitrateKbps = Math.max(0, Math.round((deltaBytes * 8) / deltaMs));
+                }
+            }
+
+            lastStats = { timestamp: now, bytes };
+
+            if (statsBitrate) statsBitrate.textContent = `${bitrateKbps} kbps`;
+            if (statsFps) statsFps.textContent = fps ? `${Math.round(fps)} fps` : '-';
+            if (statsRtt) statsRtt.textContent = rtt ? `${Math.round(rtt * 1000)} ms` : '-';
+            if (statsLoss) statsLoss.textContent = packetsTotal ? `${Math.round((packetsLost / packetsTotal) * 100)}%` : '0%';
+            if (statsJitter) statsJitter.textContent = jitter ? `${Math.round(jitter * 1000)} ms` : '-';
+        } catch (e) {
+            // ignore
+        }
+    }, 2000);
 }
 
 // ⭐ Robust auto-play function
@@ -618,6 +731,9 @@ async function startStream() {
         btnStartStream.classList.add('hidden');
         btnStopStream.classList.remove('hidden');
         showToast('Yayın başladı', 'success');
+
+        startStatsLoop(true);
+        statsStarted = true;
 
     } catch (err) {
         console.error('Stream error:', err);
@@ -933,6 +1049,12 @@ if (btnLeaveRoom) {
     btnLeaveRoom.addEventListener('click', () => {
         leaveModal.classList.remove('hidden');
         leaveModal.classList.add('flex');
+    });
+}
+
+if (btnStats && statsPanel) {
+    btnStats.addEventListener('click', () => {
+        statsPanel.classList.toggle('hidden');
     });
 }
 

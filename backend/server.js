@@ -334,6 +334,29 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ICE restart (network recovery)
+    socket.on('restartIce', async ({ transportId }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback?.({ error: 'Not in room' });
+            return;
+        }
+
+        const transport = findTransport(socketData.roomState, transportId);
+        if (!transport) {
+            callback?.({ error: 'Transport not found' });
+            return;
+        }
+
+        try {
+            const iceParameters = await transport.restartIce();
+            callback?.({ iceParameters });
+        } catch (error) {
+            console.warn(`⚠️ ICE restart failed: ${error.message}`);
+            callback?.({ error: error.message });
+        }
+    });
+
     // Produce (admin only)
     socket.on('transport-produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
@@ -672,14 +695,8 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
         temporalLayer = maxTemporalLayer;
     }
 
-    // If simulcast is present, allow spatial down/up as a secondary step
-    if (maxSpatialLayer > 0) {
-        if (overallScore <= 3 && spatialLayer > 0) {
-            spatialLayer -= 1;
-        } else if (overallScore >= 9 && spatialLayer < maxSpatialLayer) {
-            spatialLayer += 1;
-        }
-    }
+    // Keep spatial layer fixed (resolution stable), adjust FPS only
+    spatialLayer = maxSpatialLayer;
 
     if (spatialLayer === autoQuality.spatialLayer && temporalLayer === autoQuality.temporalLayer) return;
 
