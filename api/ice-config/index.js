@@ -2,8 +2,22 @@ const crypto = require('crypto');
 
 module.exports = (req, res) => {
   try {
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean);
+
+    const requestOrigin = req.headers.origin;
+
     // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (allowedOrigins.length) {
+      if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+        res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        res.setHeader('Vary', 'Origin');
+      }
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
