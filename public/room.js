@@ -563,59 +563,34 @@ async function startStream() {
             videoTrack.contentHint = 'motion';
         }
 
-        // Simulcast + SVC (multi-layer). Improves smoothness on weak networks.
-        const encodings = generateSimulcastEncodings(actualHeight, bitrate, actualFps);
-        const simulcastCodec = pickVideoCodec(true);
+        // Single-layer SVC (VP9 preferred) for smoother playback
+        const encodings = [{
+            maxBitrate: bitrate,
+            maxFramerate: actualFps,
+            scalabilityMode: 'L1T3'
+        }];
 
-        try {
-            videoProducer = await producerTransport.produce({
-                track: videoTrack,
-                encodings,
-                codec: simulcastCodec || undefined,
-                codecOptions: {
-                    // High start bitrate for immediate quality
-                    videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
-                    videoGoogleMaxBitrate: bitrate,
-                    // High minimum to prevent quality drops
-                    videoGoogleMinBitrate: Math.floor(bitrate / 2)
-                },
-                appData: {
-                    source: 'screen',
-                    resolution: actualHeight
-                }
-            });
+        const codec = pickVideoCodec(false);
 
-            console.log(`✅ Video producer created: ${videoProducer.id}`);
-            console.log(`📡 Simulcast/SVC: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
-        } catch (err) {
-            console.warn('⚠️ Simulcast failed, falling back to single-layer SVC:', err?.message || err);
+        videoProducer = await producerTransport.produce({
+            track: videoTrack,
+            encodings,
+            codec: codec || undefined,
+            codecOptions: {
+                // High start bitrate for immediate quality
+                videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
+                videoGoogleMaxBitrate: bitrate,
+                // High minimum to prevent quality drops
+                videoGoogleMinBitrate: Math.floor(bitrate / 2)
+            },
+            appData: {
+                source: 'screen',
+                resolution: actualHeight
+            }
+        });
 
-            const fallbackEncodings = [{
-                maxBitrate: bitrate,
-                maxFramerate: actualFps,
-                scalabilityMode: 'L1T3'
-            }];
-
-            const fallbackCodec = pickVideoCodec(false);
-
-            videoProducer = await producerTransport.produce({
-                track: videoTrack,
-                encodings: fallbackEncodings,
-                codec: fallbackCodec || undefined,
-                codecOptions: {
-                    videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
-                    videoGoogleMaxBitrate: bitrate,
-                    videoGoogleMinBitrate: Math.floor(bitrate / 2)
-                },
-                appData: {
-                    source: 'screen',
-                    resolution: actualHeight
-                }
-            });
-
-            console.log(`✅ Video producer created (fallback): ${videoProducer.id}`);
-            console.log(`📡 SVC fallback: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
-        }
+        console.log(`✅ Video producer created: ${videoProducer.id}`);
+        console.log(`📡 SVC: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
 
         videoTrack.onended = stopStream;
 
