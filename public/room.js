@@ -384,10 +384,9 @@ async function consumeProducer(producerId) {
         // Save video consumer for quality control
         if (params.kind === 'video') {
             videoConsumer = consumer;
-            // ALWAYS force HIGH quality immediately to override BWE throttling
-            // This ensures best quality from the start
+            // Use auto/manual quality after consumer is ready
             setTimeout(() => {
-                setConsumerQuality(consumer, currentQuality === 'auto' ? 'high' : currentQuality);
+                setConsumerQuality(consumer, currentQuality);
             }, 500); // Small delay to ensure consumer is fully set up
 
             // ⭐ Jitter Buffer Target - Lower latency (100ms instead of ~150ms default)
@@ -551,14 +550,8 @@ async function startStream() {
             videoTrack.contentHint = 'motion';
         }
 
-        // VP9 SVC Mode - L1T3 for smooth gaming/video
-        // L1T3 = 1 spatial layer (full res), 3 temporal layers (fps priority)
-        // This ensures consistent resolution without quality drops
-        const encodings = [{
-            maxBitrate: bitrate,
-            maxFramerate: actualFps,
-            scalabilityMode: 'L1T3'  // VP9 SVC: Full resolution + 3 temporal layers
-        }];
+        // Simulcast + SVC (multi-layer). Improves smoothness on weak networks.
+        const encodings = generateSimulcastEncodings(actualHeight, bitrate, actualFps);
 
         videoProducer = await producerTransport.produce({
             track: videoTrack,
@@ -577,7 +570,7 @@ async function startStream() {
         });
 
         console.log(`✅ Video producer created: ${videoProducer.id}`);
-        console.log(`📡 VP9 SVC mode: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps (L1T3)`);
+        console.log(`📡 Simulcast/SVC: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
 
         videoTrack.onended = stopStream;
 
@@ -797,10 +790,22 @@ if (qualitySelect) {
 async function setConsumerQuality(consumer, quality) {
     if (!consumer || consumer.kind !== 'video') return;
 
-    // ⭐ L1T3 SVC Mode: 1 spatial layer (always 0), 3 temporal layers
-    // spatialLayer: always 0 (single resolution)
-    // temporalLayer: 0=15fps, 1=30fps, 2=60fps
-    let spatialLayer = 0;
+    if (quality === 'auto') {
+        socket.emit('setAutoLayers', { consumerId: consumer.id }, (response) => {
+            if (response?.error) {
+                console.error('Failed to enable auto quality:', response.error);
+            } else {
+                console.log('🎬 Auto quality enabled');
+            }
+        });
+        return;
+    }
+
+    const encodingsCount = consumer.rtpParameters?.encodings?.length || 1;
+    const maxSpatialLayer = Math.max(0, encodingsCount - 1);
+
+    // spatialLayer: 0=low, 1=mid, 2=high (if available)
+    let spatialLayer = maxSpatialLayer;
     let temporalLayer;
 
     switch (quality) {
@@ -809,9 +814,11 @@ async function setConsumerQuality(consumer, quality) {
             break;
         case 'mid':
             temporalLayer = 1; // 30fps
+            spatialLayer = Math.min(1, maxSpatialLayer);
             break;
         case 'low':
             temporalLayer = 0; // 15fps
+            spatialLayer = 0;
             break;
         case 'auto':
         default:

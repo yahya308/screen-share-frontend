@@ -428,11 +428,41 @@ io.on('connection', (socket) => {
                 await consumer.setPriority(255); // Max priority
             }
 
+            const maxSpatialLayer = Math.max(0, (consumer.rtpParameters.encodings?.length || 1) - 1);
+            const maxTemporalLayer = getMaxTemporalLayer(consumer.rtpParameters.encodings);
+
             // Store consumer by consumer.id (not socket.id) to support multiple consumers per viewer
-            roomState.consumers.set(consumer.id, { consumer, socketId: socket.id });
+            const consumerData = {
+                consumer,
+                socketId: socket.id,
+                autoQuality: consumer.kind === 'video'
+                    ? {
+                        enabled: true,
+                        spatialLayer: maxSpatialLayer,
+                        temporalLayer: maxTemporalLayer,
+                        maxSpatialLayer,
+                        maxTemporalLayer,
+                        lastChange: 0
+                    }
+                    : null
+            };
+
+            roomState.consumers.set(consumer.id, consumerData);
             workerManager.incrementConsumers(roomState.workerIndex);
 
             console.log(`📺 Consumer created: ${consumer.kind} for ${socket.id}`);
+
+            if (consumer.kind === 'video') {
+                try {
+                    await consumer.setPreferredLayers({ spatialLayer: maxSpatialLayer, temporalLayer: maxTemporalLayer });
+                } catch (e) {
+                    console.warn(`⚠️ Could not set initial layers for ${consumer.id}: ${e.message}`);
+                }
+
+                consumer.on('score', (score) => {
+                    autoAdjustConsumerLayers(consumerData, score);
+                });
+            }
 
             callback({
                 params: {
@@ -478,11 +508,46 @@ io.on('connection', (socket) => {
         const consumerData = socketData.roomState.consumers.get(consumerId);
         if (consumerData && consumerData.consumer) {
             try {
+                if (consumerData.autoQuality) {
+                    consumerData.autoQuality.enabled = false;
+                    consumerData.autoQuality.spatialLayer = spatialLayer;
+                    consumerData.autoQuality.temporalLayer = temporalLayer;
+                }
                 await consumerData.consumer.setPreferredLayers({ spatialLayer, temporalLayer });
                 console.log(`🎬 Layer set for ${consumerId}: spatial=${spatialLayer}, temporal=${temporalLayer}`);
                 callback?.({ success: true });
             } catch (error) {
                 console.warn(`⚠️ Could not set layers for ${consumerId}: ${error.message}`);
+                callback?.({ error: error.message });
+            }
+        } else {
+            callback?.({ error: 'Consumer not found' });
+        }
+    });
+
+    // Enable auto quality layers (simulcast/SVC adaptation)
+    socket.on('setAutoLayers', async ({ consumerId }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData || !socketData.roomState) {
+            callback?.({ error: 'Not in room' });
+            return;
+        }
+
+        const consumerData = socketData.roomState.consumers.get(consumerId);
+        if (consumerData && consumerData.consumer && consumerData.autoQuality) {
+            try {
+                consumerData.autoQuality.enabled = true;
+                consumerData.autoQuality.lastChange = 0;
+
+                await consumerData.consumer.setPreferredLayers({
+                    spatialLayer: consumerData.autoQuality.maxSpatialLayer,
+                    temporalLayer: consumerData.autoQuality.maxTemporalLayer
+                });
+
+                console.log(`🎬 Auto layers enabled for ${consumerId}`);
+                callback?.({ success: true });
+            } catch (error) {
+                console.warn(`⚠️ Could not enable auto layers for ${consumerId}: ${error.message}`);
                 callback?.({ error: error.message });
             }
         } else {
@@ -545,6 +610,65 @@ io.on('connection', (socket) => {
 });
 
 // ==================== HELPERS ====================
+
+function getMaxTemporalLayer(encodings = []) {
+    let maxTemporalLayer = 0;
+    for (const encoding of encodings) {
+        const mode = encoding?.scalabilityMode || '';
+        const match = mode.match(/L\dT(\d)/i);
+        if (match) {
+            const layers = parseInt(match[1], 10);
+            if (Number.isFinite(layers) && layers > 0) {
+                maxTemporalLayer = Math.max(maxTemporalLayer, layers - 1);
+            }
+        }
+    }
+    return maxTemporalLayer;
+}
+
+async function autoAdjustConsumerLayers(consumerData, score = []) {
+    const autoQuality = consumerData?.autoQuality;
+    if (!autoQuality?.enabled || !consumerData?.consumer) return;
+
+    const now = Date.now();
+    if (now - autoQuality.lastChange < 3000) return; // debounce
+
+    const scores = Array.isArray(score)
+        ? score.map(s => s?.score).filter(s => typeof s === 'number')
+        : [];
+
+    const overallScore = scores.length ? Math.min(...scores) : 10;
+
+    let { spatialLayer, temporalLayer, maxSpatialLayer, maxTemporalLayer } = autoQuality;
+
+    if (overallScore <= 3) {
+        if (temporalLayer > 0) {
+            temporalLayer -= 1;
+        } else if (spatialLayer > 0) {
+            spatialLayer -= 1;
+            temporalLayer = maxTemporalLayer;
+        }
+    } else if (overallScore >= 8) {
+        if (spatialLayer < maxSpatialLayer) {
+            spatialLayer += 1;
+            temporalLayer = maxTemporalLayer;
+        } else if (temporalLayer < maxTemporalLayer) {
+            temporalLayer += 1;
+        }
+    }
+
+    if (spatialLayer === autoQuality.spatialLayer && temporalLayer === autoQuality.temporalLayer) return;
+
+    try {
+        await consumerData.consumer.setPreferredLayers({ spatialLayer, temporalLayer });
+        autoQuality.spatialLayer = spatialLayer;
+        autoQuality.temporalLayer = temporalLayer;
+        autoQuality.lastChange = now;
+        console.log(`🎛️ Auto layers adjusted: spatial=${spatialLayer}, temporal=${temporalLayer} (score=${overallScore})`);
+    } catch (error) {
+        console.warn(`⚠️ Auto layer adjust failed: ${error.message}`);
+    }
+}
 
 function handleLeaveRoom(socket) {
     const result = roomManager.leaveRoom(socket.id);
