@@ -641,19 +641,21 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
 
     let { spatialLayer, temporalLayer, maxSpatialLayer, maxTemporalLayer } = autoQuality;
 
-    if (overallScore <= 3) {
-        if (temporalLayer > 0) {
-            temporalLayer -= 1;
-        } else if (spatialLayer > 0) {
-            spatialLayer -= 1;
-            temporalLayer = maxTemporalLayer;
-        }
+    // Aggressive temporal scaling for single-layer SVC
+    if (overallScore <= 4) {
+        temporalLayer = 0;
+    } else if (overallScore <= 6) {
+        temporalLayer = Math.min(1, maxTemporalLayer);
     } else if (overallScore >= 8) {
-        if (spatialLayer < maxSpatialLayer) {
+        temporalLayer = maxTemporalLayer;
+    }
+
+    // If simulcast is present, allow spatial down/up as a secondary step
+    if (maxSpatialLayer > 0) {
+        if (overallScore <= 3 && spatialLayer > 0) {
+            spatialLayer -= 1;
+        } else if (overallScore >= 9 && spatialLayer < maxSpatialLayer) {
             spatialLayer += 1;
-            temporalLayer = maxTemporalLayer;
-        } else if (temporalLayer < maxTemporalLayer) {
-            temporalLayer += 1;
         }
     }
 
