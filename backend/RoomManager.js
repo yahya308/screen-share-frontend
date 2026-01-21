@@ -10,6 +10,13 @@ const PIPE_THRESHOLD = 100; // Users per worker before PipeTransport
 
 const ADMIN_GRACE_PERIOD = 5000; // 5 seconds for admin to reconnect
 
+const ROOM_NAME_MIN = 3;
+const ROOM_NAME_MAX = 50;
+const PASSWORD_MIN = 4;
+const PASSWORD_MAX = 64;
+const MAX_USERS_MIN = 2;
+const MAX_USERS_MAX = 1000;
+
 class RoomManager {
     constructor(workerManager) {
         this.workerManager = workerManager;
@@ -29,6 +36,21 @@ class RoomManager {
      * Create a new room
      */
     async createRoom({ name, password, adminSocketId, maxUsers }) {
+        const roomName = (name || '').trim();
+        if (roomName.length < ROOM_NAME_MIN || roomName.length > ROOM_NAME_MAX) {
+            return { error: `Oda adı ${ROOM_NAME_MIN}-${ROOM_NAME_MAX} karakter olmalı` };
+        }
+
+        const requestedMaxUsers = Number.isFinite(Number(maxUsers)) ? Number(maxUsers) : 100;
+        if (requestedMaxUsers < MAX_USERS_MIN || requestedMaxUsers > MAX_USERS_MAX) {
+            return { error: `Maksimum kullanıcı ${MAX_USERS_MIN}-${MAX_USERS_MAX} arasında olmalı` };
+        }
+
+        const passwordValue = (password || '').trim();
+        if (passwordValue && (passwordValue.length < PASSWORD_MIN || passwordValue.length > PASSWORD_MAX)) {
+            return { error: `Şifre ${PASSWORD_MIN}-${PASSWORD_MAX} karakter olmalı` };
+        }
+
         // Check room limit
         if (database.getRoomCount() >= MAX_ROOMS) {
             return { error: 'Sunucu oda limitine ulaştı (50)' };
@@ -43,11 +65,11 @@ class RoomManager {
         // Save to database
         const success = database.createRoom({
             id: roomId,
-            name,
-            password,
+            name: roomName,
+            password: passwordValue || null,
             adminSocketId,
             workerIndex,
-            maxUsers: maxUsers || 100
+            maxUsers: requestedMaxUsers || 100
         });
 
         if (!success) {
@@ -101,17 +123,23 @@ class RoomManager {
      * Join a room
      */
     async joinRoom(roomId, socketId, password, clientIp) {
+        if (!roomId || typeof roomId !== 'string' || roomId.length > 100) {
+            return { error: 'Geçersiz oda kimliği' };
+        }
+
         const room = database.getRoom(roomId);
         if (!room) {
             return { error: 'Oda bulunamadı' };
         }
 
         // Check password if required
-        if (room.password_hash && password) {
-            if (!database.verifyPassword(roomId, password)) {
+        const passwordValue = (password || '').trim();
+
+        if (room.password_hash && passwordValue) {
+            if (!database.verifyPassword(roomId, passwordValue)) {
                 return { error: 'Yanlış şifre', needPassword: true };
             }
-        } else if (room.password_hash && !password) {
+        } else if (room.password_hash && !passwordValue) {
             return { error: 'Şifre gerekli', needPassword: true };
         }
 
