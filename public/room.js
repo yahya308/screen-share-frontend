@@ -159,6 +159,10 @@ let consumerTransport;
 let videoProducer;
 let micProducer;
 let systemAudioProducer;
+let mixedAudioProducer;
+let systemAudioTrack = null;
+let micTrack = null;
+let audioContext = null;
 const consumers = new Map();
 let isAdmin = false;
 let currentQuality = 'auto';
@@ -523,6 +527,12 @@ async function startStream() {
         systemAudioProducer.close();
         systemAudioProducer = null;
     }
+    if (mixedAudioProducer) {
+        console.log('🗑️ Closing existing mixed audio producer');
+        socket.emit('producer-closing', { producerId: mixedAudioProducer.id });
+        mixedAudioProducer.close();
+        mixedAudioProducer = null;
+    }
     if (micProducer) {
         console.log('🗑️ Closing existing mic producer');
         socket.emit('producer-closing', { producerId: micProducer.id });
@@ -594,12 +604,12 @@ async function startStream() {
 
         videoTrack.onended = stopStream;
 
-        // System audio
+        // System audio (mixed track)
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
             console.log('🔊 System audio track captured:', audioTrack.id);
-            systemAudioProducer = await producerTransport.produce({ track: audioTrack });
-            console.log('✅ System audio producer created:', systemAudioProducer.id);
+            systemAudioTrack = audioTrack;
+            await setupMixedAudioProducer();
             btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
         } else {
             console.warn('❌ No system audio track captured! User may not have selected "Share tab audio"');
@@ -669,11 +679,25 @@ function stopStream() {
         systemAudioProducer = null;
         btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
     }
+    if (mixedAudioProducer) {
+        socket.emit('producer-closing', { producerId: mixedAudioProducer.id });
+        mixedAudioProducer.close();
+        mixedAudioProducer = null;
+    }
     if (micProducer) {
         socket.emit('producer-closing', { producerId: micProducer.id });
         micProducer.close();
         micProducer = null;
         btnToggleMic.textContent = '🎤 Mikrofon (Kapalı)';
+    }
+
+    if (systemAudioTrack) {
+        systemAudioTrack.stop();
+        systemAudioTrack = null;
+    }
+    if (micTrack) {
+        micTrack.stop();
+        micTrack = null;
     }
 
     if (localVideo.srcObject) {
@@ -687,19 +711,19 @@ function stopStream() {
 }
 
 btnToggleMic.addEventListener('click', async () => {
-    if (micProducer) {
-        socket.emit('producer-closing', { producerId: micProducer.id });
-        micProducer.close();
-        micProducer = null;
+    if (micTrack) {
+        micTrack.stop();
+        micTrack = null;
         btnToggleMic.textContent = '🎤 Mikrofon (Kapalı)';
+        await setupMixedAudioProducer();
     } else {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const track = stream.getAudioTracks()[0];
             console.log('🎤 Microphone track captured:', track.id);
-            micProducer = await producerTransport.produce({ track });
-            console.log('✅ Microphone producer created:', micProducer.id);
+            micTrack = track;
             btnToggleMic.textContent = '🎤 Mikrofon (Açık)';
+            await setupMixedAudioProducer();
         } catch (err) {
             console.error('❌ Microphone access failed:', err);
             showToast('Mikrofon erişimi başarısız');
@@ -708,25 +732,67 @@ btnToggleMic.addEventListener('click', async () => {
 });
 
 btnToggleAudio.addEventListener('click', async () => {
-    if (systemAudioProducer) {
-        socket.emit('producer-closing', { producerId: systemAudioProducer.id });
-        systemAudioProducer.close();
-        systemAudioProducer = null;
+    if (systemAudioTrack) {
+        systemAudioTrack.stop();
+        systemAudioTrack = null;
         btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
+        await setupMixedAudioProducer();
     } else {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
             stream.getVideoTracks().forEach(t => t.stop());
             const track = stream.getAudioTracks()[0];
             if (track) {
-                systemAudioProducer = await producerTransport.produce({ track });
+                systemAudioTrack = track;
                 btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
+                await setupMixedAudioProducer();
             }
         } catch (err) {
             console.error(err);
         }
     }
 });
+
+async function setupMixedAudioProducer() {
+    if (!producerTransport) return;
+
+    if (mixedAudioProducer) {
+        socket.emit('producer-closing', { producerId: mixedAudioProducer.id });
+        mixedAudioProducer.close();
+        mixedAudioProducer = null;
+    }
+
+    if (!systemAudioTrack && !micTrack) return;
+
+    if (!audioContext || audioContext.state === 'closed') {
+        audioContext = new AudioContext();
+    }
+
+    const destination = audioContext.createMediaStreamDestination();
+
+    if (systemAudioTrack) {
+        const systemSource = audioContext.createMediaStreamSource(new MediaStream([systemAudioTrack]));
+        systemSource.connect(destination);
+    }
+
+    if (micTrack) {
+        const micSource = audioContext.createMediaStreamSource(new MediaStream([micTrack]));
+        micSource.connect(destination);
+    }
+
+    const mixedTrack = destination.stream.getAudioTracks()[0];
+    if (!mixedTrack) return;
+
+    mixedAudioProducer = await producerTransport.produce({
+        track: mixedTrack,
+        codecOptions: {
+            opusStereo: 1,
+            opusFec: 1,
+            opusDtx: 1,
+            opusMaxAverageBitrate: 128000
+        }
+    });
+}
 
 btnCloseRoom.addEventListener('click', () => {
     if (confirm('Odayı kapatmak istediğinize emin misiniz?')) {

@@ -296,6 +296,17 @@ io.on('connection', (socket) => {
                 config.mediasoup.webRtcTransport
             );
 
+            try {
+                if (sender && config.mediasoup.webRtcTransport.maxIncomingBitrate) {
+                    await transport.setMaxIncomingBitrate(config.mediasoup.webRtcTransport.maxIncomingBitrate);
+                }
+                if (!sender && config.mediasoup.webRtcTransport.maxIncomingBitrate) {
+                    await transport.setMaxOutgoingBitrate(config.mediasoup.webRtcTransport.maxIncomingBitrate);
+                }
+            } catch (e) {
+                console.warn(`⚠️ Transport bitrate tuning skipped: ${e.message}`);
+            }
+
             roomState.transports.set(socket.id + (sender ? '-send' : '-recv'), transport);
 
             callback({
@@ -423,9 +434,11 @@ io.on('connection', (socket) => {
                 paused: true
             });
 
-            // ⭐ Set max priority for video consumers
-            if (consumer.kind === 'video') {
-                await consumer.setPriority(255); // Max priority
+            // ⭐ Audio-first priority
+            if (consumer.kind === 'audio') {
+                await consumer.setPriority(255); // Highest for audio
+            } else if (consumer.kind === 'video') {
+                await consumer.setPriority(200); // Slightly lower for video
             }
 
             const maxSpatialLayer = Math.max(0, (consumer.rtpParameters.encodings?.length || 1) - 1);
@@ -488,6 +501,15 @@ io.on('connection', (socket) => {
             try {
                 await consumerData.consumer.resume();
                 console.log(`▶️ Consumer resumed: ${consumerId}`);
+
+                if (consumerData.consumer.kind === 'video') {
+                    try {
+                        await consumerData.consumer.requestKeyFrame();
+                        console.log(`🔑 Keyframe requested on resume: ${consumerId}`);
+                    } catch (error) {
+                        console.warn(`⚠️ Could not request keyframe on resume: ${error.message}`);
+                    }
+                }
             } catch (error) {
                 // Consumer might be closed already, this is not critical
                 console.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
