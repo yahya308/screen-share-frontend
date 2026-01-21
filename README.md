@@ -173,6 +173,8 @@ pm2 save
 pm2 startup
 ```
 
+> **Not:** Prod ortamda kullanılan sunucu `backend/` klasöründedir (Dockerfile/PM2 burada). Üst dizindeki `server.dev.js` sadece dev/test içindir; `server.js` uyumluluk için bırakılmış legacy giriş noktasıdır. Prod akışta kullanılmaz.
+
 ### Frontend Setup (Local Dev)
 
 ```bash

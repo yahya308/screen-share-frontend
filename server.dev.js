@@ -1,4 +1,3 @@
-// Legacy dev entrypoint (use server.dev.js instead)
 require('dotenv').config();
 const express = require('express');
 const http = require('http');

@@ -2,15 +2,15 @@
   "name": "screen-share-app",
   "version": "1.0.0",
   "description": "Simple WebRTC screen sharing application",
-  "main": "server.js",
+  "main": "server.dev.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node server.dev.js",
+    "dev": "nodemon server.dev.js",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "vercel-build": "echo 'Build completed'",
     "vercel-dev": "npm run dev",
-    "render-start": "node server.js"
+    "render-start": "node server.dev.js"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
