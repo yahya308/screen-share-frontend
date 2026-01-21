@@ -164,6 +164,19 @@ let isAdmin = false;
 let currentQuality = 'auto';
 let videoConsumer = null;
 
+function pickVideoCodec(preferSimulcast) {
+    const codecs = device?.rtpCapabilities?.codecs || [];
+    const vp8 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/vp8');
+    const h264 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/h264');
+    const vp9 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/vp9');
+
+    if (preferSimulcast) {
+        return vp8 || h264 || vp9 || null;
+    }
+
+    return vp9 || vp8 || h264 || null;
+}
+
 // ==================== INIT ====================
 
 initSocket();
@@ -552,25 +565,57 @@ async function startStream() {
 
         // Simulcast + SVC (multi-layer). Improves smoothness on weak networks.
         const encodings = generateSimulcastEncodings(actualHeight, bitrate, actualFps);
+        const simulcastCodec = pickVideoCodec(true);
 
-        videoProducer = await producerTransport.produce({
-            track: videoTrack,
-            encodings,
-            codecOptions: {
-                // High start bitrate for immediate quality
-                videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
-                videoGoogleMaxBitrate: bitrate,
-                // High minimum to prevent quality drops
-                videoGoogleMinBitrate: Math.floor(bitrate / 2)
-            },
-            appData: {
-                source: 'screen',
-                resolution: actualHeight
-            }
-        });
+        try {
+            videoProducer = await producerTransport.produce({
+                track: videoTrack,
+                encodings,
+                codec: simulcastCodec || undefined,
+                codecOptions: {
+                    // High start bitrate for immediate quality
+                    videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
+                    videoGoogleMaxBitrate: bitrate,
+                    // High minimum to prevent quality drops
+                    videoGoogleMinBitrate: Math.floor(bitrate / 2)
+                },
+                appData: {
+                    source: 'screen',
+                    resolution: actualHeight
+                }
+            });
 
-        console.log(`✅ Video producer created: ${videoProducer.id}`);
-        console.log(`📡 Simulcast/SVC: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
+            console.log(`✅ Video producer created: ${videoProducer.id}`);
+            console.log(`📡 Simulcast/SVC: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
+        } catch (err) {
+            console.warn('⚠️ Simulcast failed, falling back to single-layer SVC:', err?.message || err);
+
+            const fallbackEncodings = [{
+                maxBitrate: bitrate,
+                maxFramerate: actualFps,
+                scalabilityMode: 'L1T3'
+            }];
+
+            const fallbackCodec = pickVideoCodec(false);
+
+            videoProducer = await producerTransport.produce({
+                track: videoTrack,
+                encodings: fallbackEncodings,
+                codec: fallbackCodec || undefined,
+                codecOptions: {
+                    videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
+                    videoGoogleMaxBitrate: bitrate,
+                    videoGoogleMinBitrate: Math.floor(bitrate / 2)
+                },
+                appData: {
+                    source: 'screen',
+                    resolution: actualHeight
+                }
+            });
+
+            console.log(`✅ Video producer created (fallback): ${videoProducer.id}`);
+            console.log(`📡 SVC fallback: ${actualHeight}p @ ${actualFps}fps, ${bitrate / 1000}kbps`);
+        }
 
         videoTrack.onended = stopStream;
 
