@@ -281,13 +281,13 @@ function registerSocketEvents() {
 
     // Moderation
     socket.on('you-were-kicked', () => {
-        showToast('Odadan atıldınız');
-        setTimeout(() => window.location.href = 'index.html', 2000);
+        alert('Oda sahibi tarafından odadan atıldınız!');
+        window.location.href = 'index.html';
     });
 
     socket.on('you-were-banned', () => {
-        showToast('Bu odadan banlandınız');
-        setTimeout(() => window.location.href = 'index.html', 2500);
+        alert('Oda sahibi tarafından BU ODADAN BANLANDINIZ! Artık bu sunucu çalışırken giriş yapamazsınız.');
+        window.location.href = 'index.html';
     });
 
     // Viewer mic state changed by admin

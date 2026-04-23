@@ -506,14 +506,12 @@ io.on('connection', (socket) => {
             const transport = findTransport(socketData.roomState, transportId);
             if (!transport) { callback({ error: 'Transport bulunamadı' }); return; }
 
-            const producer = await socketData.roomState.router.produce
-                ? (await transport.produce({
-                    kind,
-                    rtpParameters,
-                    appData: { ...appData, socketId: socket.id }, // Track owner
-                    keyFrameRequestDelay: 500
-                }))
-                : null;
+            const producer = await transport.produce({
+                kind,
+                rtpParameters,
+                appData: { ...appData, socketId: socket.id }, // Track owner
+                keyFrameRequestDelay: 500
+            });
 
             if (!producer) { callback({ error: 'Producer oluşturulamadı' }); return; }
 
