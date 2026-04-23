@@ -736,9 +736,10 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
 
     let { spatialLayer, temporalLayer, maxSpatialLayer, maxTemporalLayer } = autoQuality;
 
-    if (overallScore <= 4) temporalLayer = 0;
-    else if (overallScore <= 6) temporalLayer = Math.min(1, maxTemporalLayer);
-    else if (overallScore >= 8) temporalLayer = maxTemporalLayer;
+    // Softened logic tailored for movie playback:
+    // Only drop 1 temporal layer (e.g. from 60 to 30fps) instead of plummeting to 15fps or 0fps
+    if (overallScore <= 3) temporalLayer = Math.max(0, maxTemporalLayer - 1);
+    else temporalLayer = maxTemporalLayer;
 
     spatialLayer = maxSpatialLayer;
 

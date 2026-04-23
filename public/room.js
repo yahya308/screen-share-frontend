@@ -651,11 +651,6 @@ async function consumeProducer(producerId) {
                 const vr = receivers.find(r => r.track?.kind === 'video');
                 if (vr && 'jitterBufferTarget' in vr) vr.jitterBufferTarget = 100;
             } catch (e) {}
-
-            setInterval(() => {
-                if (videoConsumer && !videoConsumer.closed)
-                    socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
-            }, 30000);
         }
 
         if (params.kind === 'video') {
@@ -726,7 +721,7 @@ async function startStream() {
         const actualH    = settings.height || height;
         const actualFps  = settings.frameRate || fps;
 
-        if (videoTrack.contentHint !== undefined) videoTrack.contentHint = 'motion';
+        if (videoTrack.contentHint !== undefined) videoTrack.contentHint = 'detail';
 
         const codec = pickVideoCodec(false);
         videoProducer = await producerTransport.produce({
@@ -736,7 +731,7 @@ async function startStream() {
             codecOptions: {
                 videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
                 videoGoogleMaxBitrate: bitrate,
-                videoGoogleMinBitrate: Math.floor(bitrate / 2)
+                videoGoogleMinBitrate: Math.floor(bitrate * 0.6) // Keep resolution high
             },
             appData: { source: 'screen', resolution: actualH }
         });
