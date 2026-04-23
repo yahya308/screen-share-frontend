@@ -513,8 +513,13 @@ async function initMediasoup() {
         device = new Device();
         await device.load({ routerRtpCapabilities: rtpCapabilities });
 
-        if (isAdmin) createSendTransport();
-        else createRecvTransport();
+        if (isAdmin) {
+            createSendTransport();
+            createRecvTransport();
+        }
+        else {
+            createRecvTransport();
+        }
     });
 }
 
@@ -729,7 +734,13 @@ async function startStream() {
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
             systemAudioTrack = audioTrack;
-            await setupMixedAudioProducer();
+            if (producerTransport) {
+                systemAudioProducer = await producerTransport.produce({
+                    track: systemAudioTrack,
+                    codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 128000 },
+                    appData: { source: 'admin-sys-audio' }
+                });
+            }
             btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
         }
 
@@ -772,13 +783,25 @@ btnToggleMic.addEventListener('click', async () => {
     if (micTrack) {
         micTrack.stop(); micTrack = null;
         btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Kapalı)';
-        await setupMixedAudioProducer();
+        if (micProducer) {
+            socket.emit('producer-closing', { producerId: micProducer.id });
+            try { micProducer.close(); } catch(e) {}
+            micProducer = null;
+        }
+        stopVAD();
     } else {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 } });
             micTrack = stream.getAudioTracks()[0];
             btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Açık)';
-            await setupMixedAudioProducer();
+            if (producerTransport) {
+                micProducer = await producerTransport.produce({
+                    track: micTrack,
+                    codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 48000 },
+                    appData: { source: 'admin-mic' }
+                });
+            }
+            setupVAD(stream);
         } catch (err) {
             showToast('Mikrofon erişimi başarısız');
         }
@@ -790,7 +813,11 @@ btnToggleAudio.addEventListener('click', async () => {
     if (systemAudioTrack) {
         systemAudioTrack.stop(); systemAudioTrack = null;
         btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
-        await setupMixedAudioProducer();
+        if (systemAudioProducer) {
+            socket.emit('producer-closing', { producerId: systemAudioProducer.id });
+            try { systemAudioProducer.close(); } catch(e) {}
+            systemAudioProducer = null;
+        }
     } else {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
@@ -799,37 +826,17 @@ btnToggleAudio.addEventListener('click', async () => {
             if (track) {
                 systemAudioTrack = track;
                 btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
-                await setupMixedAudioProducer();
+                if (producerTransport) {
+                    systemAudioProducer = await producerTransport.produce({
+                        track: systemAudioTrack,
+                        codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 128000 },
+                        appData: { source: 'admin-sys-audio' }
+                    });
+                }
             }
         } catch (err) { console.error(err); }
     }
 });
-
-async function setupMixedAudioProducer() {
-    if (!producerTransport) return;
-
-    if (mixedAudioProducer) {
-        socket.emit('producer-closing', { producerId: mixedAudioProducer.id });
-        try { mixedAudioProducer.close(); } catch (e) {}
-        mixedAudioProducer = null;
-    }
-
-    if (!systemAudioTrack && !micTrack) return;
-
-    if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContext({ sampleRate: 48000 });
-
-    const dest = audioContext.createMediaStreamDestination();
-    if (systemAudioTrack) audioContext.createMediaStreamSource(new MediaStream([systemAudioTrack])).connect(dest);
-    if (micTrack) audioContext.createMediaStreamSource(new MediaStream([micTrack])).connect(dest);
-
-    const mixedTrack = dest.stream.getAudioTracks()[0];
-    if (!mixedTrack) return;
-
-    mixedAudioProducer = await producerTransport.produce({
-        track: mixedTrack,
-        codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 128000 }
-    });
-}
 
 // ==================== ADMIN: ROOM CONTROLS ====================
 

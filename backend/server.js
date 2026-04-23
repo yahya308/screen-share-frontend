@@ -542,7 +542,14 @@ io.on('connection', (socket) => {
         if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback([]); return; }
-        const ids = Array.from(socketData.roomState.producers.keys());
+        
+        const ids = [];
+        for (const [id, producer] of socketData.roomState.producers) {
+            if (producer.appData?.socketId !== socket.id) {
+                ids.push(id);
+            }
+        }
+        
         console.log(`📡 Sending ${ids.length} producers to ${socket.id}`);
         callback(ids);
     });
