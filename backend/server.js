@@ -17,19 +17,12 @@ const rateLimiter = require('./RateLimiter');
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map(origin => origin.trim())
+    .map(o => o.trim())
     .filter(Boolean);
 
 const corsOptions = allowedOrigins.length
-    ? {
-        origin: allowedOrigins,
-        methods: ['GET', 'POST'],
-        credentials: true
-    }
-    : {
-        origin: '*',
-        methods: ['GET', 'POST']
-    };
+    ? { origin: allowedOrigins, methods: ['GET', 'POST'], credentials: true }
+    : { origin: '*', methods: ['GET', 'POST'] };
 
 const app = express();
 app.use(cors(corsOptions));
@@ -38,25 +31,18 @@ app.use(express.static('../public'));
 // ==================== SERVER SETUP ====================
 
 let server;
-
-// Check for SSL certificates
 const certPath = config.https?.cert;
 const keyPath = config.https?.key;
 
 if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    server = https.createServer({
-        cert: fs.readFileSync(certPath),
-        key: fs.readFileSync(keyPath)
-    }, app);
+    server = https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }, app);
     console.log('🔒 HTTPS Server');
 } else {
     server = http.createServer(app);
-    console.log('⚠️ HTTP Server (SSL not found)');
+    console.log('⚠️  HTTP Server (SSL not found)');
 }
 
-const io = new Server(server, {
-    cors: corsOptions
-});
+const io = new Server(server, { cors: corsOptions });
 
 // ==================== MANAGERS ====================
 
@@ -65,105 +51,91 @@ let roomManager;
 
 // ==================== HEALTH CHECK ENDPOINTS ====================
 
-// Root endpoint for health check
 app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
-        service: 'VELOSTREAM',
-        version: '1.0.0',
-        uptime: Math.floor(process.uptime())
-    });
+    res.status(200).json({ status: 'ok', service: 'VELOSTREAM', version: '2.0.0', uptime: Math.floor(process.uptime()) });
 });
 
-// Detailed health endpoint
 app.get('/health', (req, res) => {
-    const workers = workerManager?.workers?.length || 0;
     res.status(200).json({
         status: 'healthy',
-        workers: workers,
+        workers: workerManager?.workers?.length || 0,
         uptime: Math.floor(process.uptime()),
         memory: process.memoryUsage(),
         timestamp: new Date().toISOString()
     });
 });
 
+// ==================== INPUT HELPERS ====================
+
+/** Sanitize chat message: trim + limit length + basic safety */
+function sanitizeChatMessage(msg) {
+    if (typeof msg !== 'string') return '';
+    return msg.trim().slice(0, 500);
+}
+
 // ==================== SOCKET HANDLERS ====================
 
 io.on('connection', (socket) => {
-    const clientIp = socket.handshake.address;
-    console.log(`Client connected: ${socket.id}`);
+    const clientIp = socket.handshake.headers['x-forwarded-for']?.split(',')[0]?.trim()
+        || socket.handshake.address;
+
+    console.log(`Client connected: ${socket.id} ip=${clientIp}`);
 
     // ==================== LOBBY EVENTS ====================
 
-    // Get all rooms
     socket.on('get-rooms', (callback) => {
-        const rooms = roomManager.getAllRooms();
-        callback(rooms);
+        if (typeof callback !== 'function') return;
+        callback(roomManager.getAllRooms());
     });
 
-    // Create room
     socket.on('create-room', async ({ name, password, maxUsers }, callback) => {
+        if (typeof callback !== 'function') return;
+
         const result = await roomManager.createRoom({
-            name,
-            password,
-            adminSocketId: socket.id,
-            maxUsers
+            name, password, adminSocketId: socket.id, maxUsers
         });
 
-        if (result.error) {
-            callback({ error: result.error });
-            return;
-        }
+        if (result.error) { callback({ error: result.error }); return; }
 
         socket.join(result.roomId);
-        callback({
-            success: true,
-            roomId: result.roomId,
-            isPublic: result.isPublic
-        });
+        callback({ success: true, roomId: result.roomId, isPublic: result.isPublic });
 
-        // Notify lobby of new room
         io.emit('room-created', {
-            id: result.roomId,
-            name,
-            is_locked: !!password,
-            userCount: 1,
-            max_users: maxUsers || 100
+            id: result.roomId, name, is_locked: !!password,
+            userCount: 1, max_users: maxUsers || 100
         });
 
-        // Start orphan timeout - if admin doesn't rejoin in 30s, delete room
         roomManager.startOrphanTimeout(result.roomId, (roomId) => {
             io.emit('room-deleted', { id: roomId });
         });
     });
 
-    // Admin rejoin (after page redirect)
-    socket.on('admin-rejoin', async ({ roomId }, callback) => {
+    // Admin rejoin after page redirect
+    socket.on('admin-rejoin', async ({ roomId, nickname }, callback) => {
+        if (typeof callback !== 'function') return;
+
         const room = database.getRoom(roomId);
-        if (!room) {
-            callback({ error: 'Oda bulunamadı' });
-            return;
-        }
+        if (!room) { callback({ error: 'Oda bulunamadı' }); return; }
 
-        // Cancel any pending room close
+        // Validate nickname
+        const nickErr = RoomManager.validateNickname(nickname);
+        if (nickErr) { callback({ error: nickErr }); return; }
+
         roomManager.cancelPendingClose(roomId);
-
-        // Cancel orphan room timeout (admin successfully rejoined)
         roomManager.cancelPendingAdminJoin(roomId);
 
-        // Update admin socket ID
-        database.updateAdminSocket(roomId, socket.id);
-        roomManager.socketRooms.set(socket.id, { roomId, role: 'admin' });
+        // Update admin socket
+        roomManager.updateAdminSocket(roomId, socket.id, clientIp);
+
+        // Set nickname
+        roomManager.setNickname(socket.id, nickname.trim());
+
+        const roomState = roomManager.rooms.get(roomId);
+        if (roomState) roomState.adminJoined = true;
 
         socket.join(roomId);
 
-        const roomState = roomManager.rooms.get(roomId);
         const userCount = roomManager.getRoomUserCount(roomId);
-
-        // Mark admin as joined
-        if (roomState) {
-            roomState.adminJoined = true;
-        }
 
         callback({
             success: true,
@@ -171,15 +143,22 @@ io.on('connection', (socket) => {
             roomName: room.name,
             maxUsers: room.max_users,
             userCount,
-            isStreaming: roomState?.isStreaming || false
+            isStreaming: roomState?.isStreaming || false,
+            viewerMicEnabled: roomState?.viewerMicEnabled ?? true,
+            chatEnabled: roomState?.chatEnabled ?? true
         });
 
-        console.log(`👑 Admin rejoined room ${roomId} with new socket ${socket.id}`);
+        // Broadcast updated user list
+        io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
+
+        console.log(`👑 Admin rejoined room ${roomId} as "${nickname.trim()}"`);
     });
 
-    // Join room
-    socket.on('join-room', async ({ roomId, password }, callback) => {
-        // Check rate limit
+    // Join room (viewer)
+    socket.on('join-room', async ({ roomId, password, nickname }, callback) => {
+        if (typeof callback !== 'function') return;
+
+        // Rate limit (password brute-force)
         const blockStatus = rateLimiter.isBlocked(clientIp, roomId);
         if (blockStatus.blocked) {
             callback({
@@ -194,11 +173,9 @@ io.on('connection', (socket) => {
 
         if (result.error) {
             if (result.needPassword && password) {
-                // Wrong password, record failed attempt
                 const attemptResult = rateLimiter.recordFailedAttempt(clientIp, roomId);
                 callback({
-                    error: result.error,
-                    needPassword: true,
+                    error: result.error, needPassword: true,
                     remainingAttempts: attemptResult.remainingAttempts,
                     blocked: attemptResult.blocked,
                     remainingTime: attemptResult.remainingTime
@@ -209,92 +186,259 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Success - reset rate limiter
         rateLimiter.resetAttempts(clientIp, roomId);
-
         socket.join(roomId);
+
+        // Set nickname if provided (may be absent for lobby-only password check)
+        if (nickname) {
+            const nickErr = RoomManager.validateNickname(nickname);
+            if (nickErr) {
+                // Undo join and return error
+                roomManager.leaveRoom(socket.id);
+                socket.leave(roomId);
+                callback({ error: nickErr });
+                return;
+            }
+            const nickResult = roomManager.setNickname(socket.id, nickname.trim());
+            if (nickResult.error) {
+                roomManager.leaveRoom(socket.id);
+                socket.leave(roomId);
+                callback({ error: nickResult.error });
+                return;
+            }
+        }
+
         callback(result);
 
-        // Notify room of new user
-        socket.to(roomId).emit('user-joined', {
-            userCount: roomManager.getRoomUserCount(roomId)
-        });
-
-        // Update lobby
-        io.emit('room-updated', {
-            id: roomId,
-            userCount: roomManager.getRoomUserCount(roomId)
-        });
+        // Notify room
+        socket.to(roomId).emit('user-joined', { userCount: roomManager.getRoomUserCount(roomId) });
+        io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
+        io.emit('room-updated', { id: roomId, userCount: roomManager.getRoomUserCount(roomId) });
     });
 
-    // Leave room
-    socket.on('leave-room', () => {
-        handleLeaveRoom(socket);
-    });
+    socket.on('leave-room', () => handleLeaveRoom(socket));
 
     // Close room (admin only)
     socket.on('close-room', () => {
-        if (roomManager.isAdmin(socket.id)) {
-            const socketData = roomManager.getRoomFromSocket(socket.id);
-            if (socketData) {
-                const roomId = socketData.roomId;
-
-                // Notify all users in room
-                io.to(roomId).emit('room-closed', { reason: 'Admin odayı kapattı' });
-
-                roomManager.closeRoom(roomId);
-
-                // Update lobby
-                io.emit('room-deleted', { id: roomId });
-            }
-        }
+        if (!roomManager.isAdmin(socket.id)) return;
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData) return;
+        const roomId = socketData.roomId;
+        io.to(roomId).emit('room-closed', { reason: 'Admin odayı kapattı' });
+        roomManager.closeRoom(roomId);
+        io.emit('room-deleted', { id: roomId });
     });
 
     // Update max users (admin only)
     socket.on('update-max-users', ({ maxUsers }, callback) => {
-        if (!roomManager.isAdmin(socket.id)) {
-            callback({ error: 'Yetkiniz yok' });
-            return;
-        }
-
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (socketData) {
             roomManager.updateMaxUsers(socketData.roomId, maxUsers);
-            callback({ success: true });
+            callback?.({ success: true });
         }
+    });
+
+    // ==================== MODERATION ====================
+
+    // Kick user (admin only, viewer can re-join)
+    socket.on('kick-user', ({ targetSocketId }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
+
+        const adminData = roomManager.getRoomFromSocket(socket.id);
+        if (!adminData) { callback?.({ error: 'Oda bulunamadı' }); return; }
+
+        const targetData = roomManager.socketRooms.get(targetSocketId);
+        if (!targetData || targetData.roomId !== adminData.roomId) {
+            callback?.({ error: 'Kullanıcı bu odada değil' }); return;
+        }
+        if (targetData.role === 'admin') { callback?.({ error: 'Admin kicklenemez' }); return; }
+
+        const roomId = adminData.roomId;
+
+        // Notify the kicked user
+        io.to(targetSocketId).emit('you-were-kicked');
+
+        // Clean up server state
+        const result = roomManager.leaveRoom(targetSocketId);
+        if (result?.closedProducerIds?.length) {
+            result.closedProducerIds.forEach(pid =>
+                io.to(roomId).emit('producer-closed', { remoteProducerId: pid }));
+        }
+
+        // Disconnect the socket
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket) { targetSocket.leave(roomId); targetSocket.disconnect(true); }
+
+        // Update room counts
+        const newCount = roomManager.getRoomUserCount(roomId);
+        io.to(roomId).emit('user-left', { userCount: newCount });
+        io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
+        io.emit('room-updated', { id: roomId, userCount: newCount });
+
+        callback?.({ success: true });
+    });
+
+    // Ban user (admin only, IP-based, cannot re-join this room while server running)
+    socket.on('ban-user', ({ targetSocketId }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
+
+        const adminData = roomManager.getRoomFromSocket(socket.id);
+        if (!adminData) { callback?.({ error: 'Oda bulunamadı' }); return; }
+
+        const targetData = roomManager.socketRooms.get(targetSocketId);
+        if (!targetData || targetData.roomId !== adminData.roomId) {
+            callback?.({ error: 'Kullanıcı bu odada değil' }); return;
+        }
+        if (targetData.role === 'admin') { callback?.({ error: 'Admin banlanamaz' }); return; }
+
+        const roomId = adminData.roomId;
+        const targetIp = targetData.ip;
+
+        // Apply ban
+        roomManager.banIp(roomId, targetIp);
+
+        // Notify and disconnect
+        io.to(targetSocketId).emit('you-were-banned');
+
+        const result = roomManager.leaveRoom(targetSocketId);
+        if (result?.closedProducerIds?.length) {
+            result.closedProducerIds.forEach(pid =>
+                io.to(roomId).emit('producer-closed', { remoteProducerId: pid }));
+        }
+
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket) { targetSocket.leave(roomId); targetSocket.disconnect(true); }
+
+        const newCount = roomManager.getRoomUserCount(roomId);
+        io.to(roomId).emit('user-left', { userCount: newCount });
+        io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
+        io.emit('room-updated', { id: roomId, userCount: newCount });
+
+        callback?.({ success: true });
+        console.log(`🚫 User ${targetSocketId} (IP: ${targetIp}) banned from room ${roomId}`);
+    });
+
+    // ==================== VIEWER MIC PERMISSION ====================
+
+    // Toggle viewer mic permission (admin only)
+    socket.on('toggle-viewer-mic', ({ enabled }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
+
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData?.roomState) { callback?.({ error: 'Oda bulunamadı' }); return; }
+
+        const roomState = socketData.roomState;
+        roomState.viewerMicEnabled = !!enabled;
+
+        // Broadcast new state to all in room
+        io.to(socketData.roomId).emit('viewer-mic-state', { enabled: !!enabled });
+
+        // If disabling, forcibly close all viewer audio producers
+        if (!enabled) {
+            const closedIds = [];
+            for (const [producerId, producer] of roomState.producers) {
+                const ownerData = roomManager.socketRooms.get(producer.appData?.socketId);
+                if (ownerData?.role === 'viewer' && producer.kind === 'audio') {
+                    try { producer.close(); } catch (e) {}
+                    roomState.producers.delete(producerId);
+                    closedIds.push(producerId);
+                    workerManager.decrementProducers(roomState.workerIndex);
+                }
+            }
+            if (closedIds.length) {
+                closedIds.forEach(pid =>
+                    io.to(socketData.roomId).emit('producer-closed', { remoteProducerId: pid }));
+            }
+        }
+
+        callback?.({ success: true });
+        console.log(`🎙️ Viewer mic ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
+    });
+
+    // ==================== CHAT ====================
+
+    // Toggle chat (admin only)
+    socket.on('toggle-chat', ({ enabled }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
+
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData?.roomState) { callback?.({ error: 'Oda bulunamadı' }); return; }
+
+        socketData.roomState.chatEnabled = !!enabled;
+        io.to(socketData.roomId).emit('chat-state', { enabled: !!enabled });
+
+        callback?.({ success: true });
+        console.log(`💬 Chat ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
+    });
+
+    // Send chat message
+    socket.on('chat-message', ({ message }, callback) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData?.roomState) { callback?.({ error: 'Odaya katılmadınız' }); return; }
+
+        if (!socketData.roomState.chatEnabled) {
+            callback?.({ error: 'Chat oda sahibi tarafından kapatıldı' }); return;
+        }
+
+        if (!roomManager.checkChatRateLimit(socket.id)) {
+            callback?.({ error: 'Çok hızlı mesaj gönderiyorsunuz, biraz bekleyin' }); return;
+        }
+
+        const clean = sanitizeChatMessage(message);
+        if (!clean) { callback?.({ error: 'Mesaj boş olamaz' }); return; }
+
+        const nickname = socketData.nickname || 'Anonim';
+        const role = socketData.role;
+
+        io.to(socketData.roomId).emit('chat-message', {
+            socketId: socket.id,
+            nickname,
+            role,
+            message: clean,
+            timestamp: Date.now()
+        });
+
+        callback?.({ success: true });
+    });
+
+    // ==================== VOICE ACTIVITY ====================
+
+    socket.on('voice-activity', ({ speaking }) => {
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData) return;
+
+        const roomId = roomManager.setSpeaking(socket.id, !!speaking);
+        if (!roomId) return;
+
+        // Broadcast to room (not back to sender)
+        socket.to(roomId).emit('voice-activity', { socketId: socket.id, speaking: !!speaking });
     });
 
     // ==================== MEDIASOUP EVENTS ====================
 
-    // Get router capabilities
     socket.on('getRouterRtpCapabilities', (callback) => {
+        if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback({ error: 'Odaya katılmadınız' });
-            return;
-        }
+        if (!socketData?.roomState) { callback({ error: 'Odaya katılmadınız' }); return; }
         callback(socketData.roomState.router.rtpCapabilities);
     });
 
-    // Create transport
     socket.on('createWebRtcTransport', async ({ sender }, callback) => {
+        if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback({ params: { error: 'Odaya katılmadınız' } });
-            return;
-        }
+        if (!socketData?.roomState) { callback({ params: { error: 'Odaya katılmadınız' } }); return; }
 
-        // Only admin can be sender
+        // Viewers can create a send transport ONLY when viewerMicEnabled
         if (sender && socketData.role !== 'admin') {
-            callback({ params: { error: 'Yayın yapma yetkiniz yok' } });
-            return;
+            if (!socketData.roomState.viewerMicEnabled) {
+                callback({ params: { error: 'Mikrofon özelliği şu an devre dışı' } }); return;
+            }
         }
 
         try {
             const roomState = socketData.roomState;
-            const transport = await roomState.router.createWebRtcTransport(
-                config.mediasoup.webRtcTransport
-            );
+            const transport = await roomState.router.createWebRtcTransport(config.mediasoup.webRtcTransport);
 
             try {
                 if (sender && config.mediasoup.webRtcTransport.maxIncomingBitrate) {
@@ -323,31 +467,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Connect transport
     socket.on('transport-connect', async ({ transportId, dtlsParameters }) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) return;
-
+        if (!socketData?.roomState) return;
         const transport = findTransport(socketData.roomState, transportId);
-        if (transport) {
-            await transport.connect({ dtlsParameters });
-        }
+        if (transport) await transport.connect({ dtlsParameters }).catch(e => console.warn('transport-connect error:', e));
     });
 
-    // ICE restart (network recovery)
     socket.on('restartIce', async ({ transportId }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback?.({ error: 'Not in room' });
-            return;
-        }
-
+        if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
-        if (!transport) {
-            callback?.({ error: 'Transport not found' });
-            return;
-        }
-
+        if (!transport) { callback?.({ error: 'Transport not found' }); return; }
         try {
             const iceParameters = await transport.restartIce();
             callback?.({ iceParameters });
@@ -357,46 +488,42 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Produce (admin only)
+    // Produce (admin: any kind; viewer: audio only + viewerMicEnabled)
     socket.on('transport-produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
+        if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback({ error: 'Odaya katılmadınız' });
-            return;
-        }
+        if (!socketData?.roomState) { callback({ error: 'Odaya katılmadınız' }); return; }
 
+        // Permission check for viewers
         if (socketData.role !== 'admin') {
-            callback({ error: 'Yayın yapma yetkiniz yok' });
-            return;
+            if (kind !== 'audio') { callback({ error: 'İzleyiciler sadece ses yayınlayabilir' }); return; }
+            if (!socketData.roomState.viewerMicEnabled) {
+                callback({ error: 'Mikrofon özelliği şu an devre dışı' }); return;
+            }
         }
 
         try {
             const transport = findTransport(socketData.roomState, transportId);
-            if (!transport) {
-                callback({ error: 'Transport bulunamadı' });
-                return;
-            }
+            if (!transport) { callback({ error: 'Transport bulunamadı' }); return; }
 
-            const producer = await transport.produce({
-                kind,
-                rtpParameters,
-                appData,
-                // ⭐ Faster keyframe recovery (500ms instead of 1000ms)
-                // Lower = faster freeze recovery, but more bandwidth on viewer connect
-                keyFrameRequestDelay: 500
-            });
+            const producer = await socketData.roomState.router.produce
+                ? (await transport.produce({
+                    kind,
+                    rtpParameters,
+                    appData: { ...appData, socketId: socket.id }, // Track owner
+                    keyFrameRequestDelay: 500
+                }))
+                : null;
+
+            if (!producer) { callback({ error: 'Producer oluşturulamadı' }); return; }
+
             socketData.roomState.producers.set(producer.id, producer);
-
             workerManager.incrementProducers(socketData.roomState.workerIndex);
 
-            // ⭐ Producer score monitoring for network quality
             producer.on('score', (score) => {
-                if (score[0]?.score < 5) {
-                    console.warn(`⚠️ Low producer score: ${score[0]?.score} - network issues detected`);
-                }
+                if (score[0]?.score < 5) console.warn(`⚠️ Low producer score: ${score[0]?.score}`);
             });
 
-            // Set streaming status
             if (kind === 'video') {
                 roomManager.setStreamingStatus(socketData.roomId, true);
                 socket.to(socketData.roomId).emit('stream-started');
@@ -404,100 +531,68 @@ io.on('connection', (socket) => {
 
             callback({ id: producer.id });
 
-            // Notify viewers of new producer
+            // Notify all others of new producer (works for admin screen + viewer mic)
             socket.to(socketData.roomId).emit('new-producer', producer.id);
+
         } catch (error) {
             console.error('Produce error:', error);
             callback({ error: error.message });
         }
     });
 
-    // Get existing producers
     socket.on('getProducers', (callback) => {
+        if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback([]);
-            return;
-        }
-
-        const producerIds = [];
-        socketData.roomState.producers.forEach((producer) => {
-            producerIds.push(producer.id);
-        });
-
-        console.log(`📡 Sending ${producerIds.length} producers to ${socket.id}`);
-        callback(producerIds);
+        if (!socketData?.roomState) { callback([]); return; }
+        const ids = Array.from(socketData.roomState.producers.keys());
+        console.log(`📡 Sending ${ids.length} producers to ${socket.id}`);
+        callback(ids);
     });
 
-    // Consume
     socket.on('consume', async ({ transportId, producerId, rtpCapabilities }, callback) => {
+        if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback({ params: { error: 'Odaya katılmadınız' } });
-            return;
-        }
+        if (!socketData?.roomState) { callback({ params: { error: 'Odaya katılmadınız' } }); return; }
 
         try {
             const roomState = socketData.roomState;
 
             if (!roomState.router.canConsume({ producerId, rtpCapabilities })) {
-                callback({ params: { error: 'Cannot consume' } });
-                return;
+                callback({ params: { error: 'Cannot consume' } }); return;
             }
 
             const transport = findTransport(roomState, transportId);
-            if (!transport) {
-                callback({ params: { error: 'Transport bulunamadı' } });
-                return;
-            }
+            if (!transport) { callback({ params: { error: 'Transport bulunamadı' } }); return; }
 
-            const consumer = await transport.consume({
-                producerId,
-                rtpCapabilities,
-                paused: true
-            });
+            const consumer = await transport.consume({ producerId, rtpCapabilities, paused: true });
 
-            // ⭐ Audio-first priority
-            if (consumer.kind === 'audio') {
-                await consumer.setPriority(255); // Highest for audio
-            } else if (consumer.kind === 'video') {
-                await consumer.setPriority(200); // Slightly lower for video
-            }
+            if (consumer.kind === 'audio') await consumer.setPriority(255).catch(() => {});
+            else if (consumer.kind === 'video') await consumer.setPriority(200).catch(() => {});
 
             const maxSpatialLayer = Math.max(0, (consumer.rtpParameters.encodings?.length || 1) - 1);
             const maxTemporalLayer = getMaxTemporalLayer(consumer.rtpParameters.encodings);
 
-            // Store consumer by consumer.id (not socket.id) to support multiple consumers per viewer
             const consumerData = {
                 consumer,
                 socketId: socket.id,
-                autoQuality: consumer.kind === 'video'
-                    ? {
-                        enabled: true,
-                        spatialLayer: maxSpatialLayer,
-                        temporalLayer: maxTemporalLayer,
-                        maxSpatialLayer,
-                        maxTemporalLayer,
-                        lastChange: 0
-                    }
-                    : null
+                autoQuality: consumer.kind === 'video' ? {
+                    enabled: true,
+                    spatialLayer: maxSpatialLayer,
+                    temporalLayer: maxTemporalLayer,
+                    maxSpatialLayer,
+                    maxTemporalLayer,
+                    lastChange: 0
+                } : null
             };
 
             roomState.consumers.set(consumer.id, consumerData);
             workerManager.incrementConsumers(roomState.workerIndex);
 
-            console.log(`📺 Consumer created: ${consumer.kind} for ${socket.id}`);
-
             if (consumer.kind === 'video') {
-                try {
-                    await consumer.setPreferredLayers({ spatialLayer: maxSpatialLayer, temporalLayer: maxTemporalLayer });
-                } catch (e) {
-                    console.warn(`⚠️ Could not set initial layers for ${consumer.id}: ${e.message}`);
-                }
+                try { await consumer.setPreferredLayers({ spatialLayer: maxSpatialLayer, temporalLayer: maxTemporalLayer }); }
+                catch (e) { console.warn(`⚠️ Could not set initial layers: ${e.message}`); }
 
-                consumer.on('score', (score) => {
-                    autoAdjustConsumerLayers(consumerData, score);
-                });
+                consumer.on('score', (score) => autoAdjustConsumerLayers(consumerData, score));
             }
 
             callback({
@@ -514,44 +609,30 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Resume consumer
     socket.on('resume', async ({ consumerId }) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) return;
+        if (!socketData?.roomState) return;
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData && consumerData.consumer) {
+        if (consumerData?.consumer) {
             try {
                 await consumerData.consumer.resume();
-                console.log(`▶️ Consumer resumed: ${consumerId}`);
-
                 if (consumerData.consumer.kind === 'video') {
-                    try {
-                        await consumerData.consumer.requestKeyFrame();
-                        console.log(`🔑 Keyframe requested on resume: ${consumerId}`);
-                    } catch (error) {
-                        console.warn(`⚠️ Could not request keyframe on resume: ${error.message}`);
-                    }
+                    try { await consumerData.consumer.requestKeyFrame(); } catch (e) {}
                 }
             } catch (error) {
-                // Consumer might be closed already, this is not critical
                 console.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
-                // Clean up stale consumer reference
                 socketData.roomState.consumers.delete(consumerId);
             }
         }
     });
 
-    // Set preferred layers (quality control for simulcast)
     socket.on('setPreferredLayers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback?.({ error: 'Not in room' });
-            return;
-        }
+        if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData && consumerData.consumer) {
+        if (consumerData?.consumer) {
             try {
                 if (consumerData.autoQuality) {
                     consumerData.autoQuality.enabled = false;
@@ -559,10 +640,8 @@ io.on('connection', (socket) => {
                     consumerData.autoQuality.temporalLayer = temporalLayer;
                 }
                 await consumerData.consumer.setPreferredLayers({ spatialLayer, temporalLayer });
-                console.log(`🎬 Layer set for ${consumerId}: spatial=${spatialLayer}, temporal=${temporalLayer}`);
                 callback?.({ success: true });
             } catch (error) {
-                console.warn(`⚠️ Could not set layers for ${consumerId}: ${error.message}`);
                 callback?.({ error: error.message });
             }
         } else {
@@ -570,29 +649,21 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Enable auto quality layers (simulcast/SVC adaptation)
     socket.on('setAutoLayers', async ({ consumerId }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback?.({ error: 'Not in room' });
-            return;
-        }
+        if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData && consumerData.consumer && consumerData.autoQuality) {
+        if (consumerData?.consumer && consumerData.autoQuality) {
             try {
                 consumerData.autoQuality.enabled = true;
                 consumerData.autoQuality.lastChange = 0;
-
                 await consumerData.consumer.setPreferredLayers({
                     spatialLayer: consumerData.autoQuality.maxSpatialLayer,
                     temporalLayer: consumerData.autoQuality.maxTemporalLayer
                 });
-
-                console.log(`🎬 Auto layers enabled for ${consumerId}`);
                 callback?.({ success: true });
             } catch (error) {
-                console.warn(`⚠️ Could not enable auto layers for ${consumerId}: ${error.message}`);
                 callback?.({ error: error.message });
             }
         } else {
@@ -600,36 +671,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ⭐ Request keyframe for freeze recovery
     socket.on('requestKeyFrame', async ({ consumerId }) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) return;
-
+        if (!socketData?.roomState) return;
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData && consumerData.consumer) {
-            try {
-                await consumerData.consumer.requestKeyFrame();
-                console.log(`🔑 Keyframe requested for ${consumerId} (freeze recovery)`);
-            } catch (error) {
-                console.warn(`⚠️ Could not request keyframe: ${error.message}`);
-            }
+        if (consumerData?.consumer) {
+            try { await consumerData.consumer.requestKeyFrame(); } catch (e) {}
         }
     });
 
-    // Get producers
-    socket.on('getProducers', (callback) => {
-        const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) {
-            callback([]);
-            return;
-        }
-        callback(Array.from(socketData.roomState.producers.keys()));
-    });
-
-    // Producer closing (pause/stop stream)
     socket.on('producer-closing', ({ producerId }) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData || !socketData.roomState) return;
+        if (!socketData?.roomState) return;
 
         const producer = socketData.roomState.producers.get(producerId);
         if (producer) {
@@ -637,11 +690,9 @@ io.on('connection', (socket) => {
                 roomManager.setStreamingStatus(socketData.roomId, false);
                 socket.to(socketData.roomId).emit('stream-paused');
             }
-
-            producer.close();
+            try { producer.close(); } catch (e) {}
             socketData.roomState.producers.delete(producerId);
             workerManager.decrementProducers(socketData.roomState.workerIndex);
-
             socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: producerId });
         }
     });
@@ -657,18 +708,15 @@ io.on('connection', (socket) => {
 // ==================== HELPERS ====================
 
 function getMaxTemporalLayer(encodings = []) {
-    let maxTemporalLayer = 0;
-    for (const encoding of encodings) {
-        const mode = encoding?.scalabilityMode || '';
-        const match = mode.match(/L\dT(\d)/i);
+    let max = 0;
+    for (const enc of encodings) {
+        const match = (enc?.scalabilityMode || '').match(/L\dT(\d)/i);
         if (match) {
             const layers = parseInt(match[1], 10);
-            if (Number.isFinite(layers) && layers > 0) {
-                maxTemporalLayer = Math.max(maxTemporalLayer, layers - 1);
-            }
+            if (Number.isFinite(layers) && layers > 0) max = Math.max(max, layers - 1);
         }
     }
-    return maxTemporalLayer;
+    return max;
 }
 
 async function autoAdjustConsumerLayers(consumerData, score = []) {
@@ -676,26 +724,17 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
     if (!autoQuality?.enabled || !consumerData?.consumer) return;
 
     const now = Date.now();
-    if (now - autoQuality.lastChange < 3000) return; // debounce
+    if (now - autoQuality.lastChange < 3000) return;
 
-    const scores = Array.isArray(score)
-        ? score.map(s => s?.score).filter(s => typeof s === 'number')
-        : [];
-
+    const scores = Array.isArray(score) ? score.map(s => s?.score).filter(s => typeof s === 'number') : [];
     const overallScore = scores.length ? Math.min(...scores) : 10;
 
     let { spatialLayer, temporalLayer, maxSpatialLayer, maxTemporalLayer } = autoQuality;
 
-    // Aggressive temporal scaling for single-layer SVC
-    if (overallScore <= 4) {
-        temporalLayer = 0;
-    } else if (overallScore <= 6) {
-        temporalLayer = Math.min(1, maxTemporalLayer);
-    } else if (overallScore >= 8) {
-        temporalLayer = maxTemporalLayer;
-    }
+    if (overallScore <= 4) temporalLayer = 0;
+    else if (overallScore <= 6) temporalLayer = Math.min(1, maxTemporalLayer);
+    else if (overallScore >= 8) temporalLayer = maxTemporalLayer;
 
-    // Keep spatial layer fixed (resolution stable), adjust FPS only
     spatialLayer = maxSpatialLayer;
 
     if (spatialLayer === autoQuality.spatialLayer && temporalLayer === autoQuality.temporalLayer) return;
@@ -705,7 +744,6 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
         autoQuality.spatialLayer = spatialLayer;
         autoQuality.temporalLayer = temporalLayer;
         autoQuality.lastChange = now;
-        console.log(`🎛️ Auto layers adjusted: spatial=${spatialLayer}, temporal=${temporalLayer} (score=${overallScore})`);
     } catch (error) {
         console.warn(`⚠️ Auto layer adjust failed: ${error.message}`);
     }
@@ -715,29 +753,30 @@ function handleLeaveRoom(socket) {
     const result = roomManager.leaveRoom(socket.id);
     if (!result) return;
 
+    // Emit producer-closed for any closed viewer producers
+    if (result.closedProducerIds?.length) {
+        result.closedProducerIds.forEach(pid =>
+            io.to(result.roomId).emit('producer-closed', { remoteProducerId: pid }));
+    }
+
     if (result.roomClosed) {
         io.to(result.roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
         io.emit('room-deleted', { id: result.roomId });
     } else if (result.roomPending) {
-        // Admin is disconnecting, start grace period
         roomManager.startGracePeriod(result.roomId, (roomId) => {
-            // Grace period expired, emit events
             io.to(roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
             io.emit('room-deleted', { id: roomId });
         });
     } else {
-        socket.to(result.roomId).emit('user-left', {
-            userCount: roomManager.getRoomUserCount(result.roomId)
-        });
-        io.emit('room-updated', {
-            id: result.roomId,
-            userCount: roomManager.getRoomUserCount(result.roomId)
-        });
+        const newCount = roomManager.getRoomUserCount(result.roomId);
+        socket.to(result.roomId).emit('user-left', { userCount: newCount });
+        io.to(result.roomId).emit('user-list', roomManager.getUserList(result.roomId));
+        io.emit('room-updated', { id: result.roomId, userCount: newCount });
     }
 }
 
 function findTransport(roomState, transportId) {
-    for (const [key, transport] of roomState.transports) {
+    for (const [, transport] of roomState.transports) {
         if (transport.id === transportId) return transport;
     }
     return null;
@@ -751,7 +790,7 @@ async function start() {
 
     const PORT = config.port || 3000;
     server.listen(PORT, () => {
-        console.log(`🚀 VELOSTREAM Server running on port ${PORT}`);
+        console.log(`🚀 VELOSTREAM Server v2 running on port ${PORT}`);
         console.log(`📊 Workers: ${workerManager.workers.length}`);
     });
 }
