@@ -51,6 +51,7 @@ const createModal = document.getElementById('createModal');
 const btnCancelCreate = document.getElementById('btnCancelCreate');
 const btnConfirmCreate = document.getElementById('btnConfirmCreate');
 const roomNameInput = document.getElementById('roomName');
+const createNicknameInput = document.getElementById('createNickname');
 const roomPasswordInput = document.getElementById('roomPassword');
 const roomMaxUsersInput = document.getElementById('roomMaxUsers');
 
@@ -178,11 +179,16 @@ function joinRoom(roomId, password = null) {
 
 btnCreateRoom.addEventListener('click', () => {
     roomNameInput.value = '';
+    createNicknameInput.value = sessionStorage.getItem('velo_nickname') || '';
     roomPasswordInput.value = '';
     roomMaxUsersInput.value = '8';
     createModal.classList.remove('hidden');
     createModal.classList.add('flex');
-    roomNameInput.focus();
+    if(createNicknameInput.value) {
+        roomNameInput.focus();
+    } else {
+        createNicknameInput.focus();
+    }
 });
 
 btnCancelCreate.addEventListener('click', () => {
@@ -192,6 +198,7 @@ btnCancelCreate.addEventListener('click', () => {
 
 btnConfirmCreate.addEventListener('click', () => {
     const name = roomNameInput.value.trim();
+    const nickname = createNicknameInput.value.trim();
     const password = roomPasswordInput.value.trim() || null;
     const maxUsers = parseInt(roomMaxUsersInput.value) || 8;
 
@@ -199,6 +206,18 @@ btnConfirmCreate.addEventListener('click', () => {
         showToast('Oda adı gerekli');
         return;
     }
+
+    if (!nickname) {
+        showToast('Nickname gerekli');
+        return;
+    }
+
+    if (nickname.length < 3 || nickname.length > 30) {
+        showToast('Nickname 3-30 karakter arası olmalı');
+        return;
+    }
+
+    sessionStorage.setItem('velo_nickname', nickname);
 
     socket.emit('create-room', { name, password, maxUsers }, (result) => {
         if (result.error) {
