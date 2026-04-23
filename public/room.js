@@ -156,6 +156,7 @@ function showNicknameModal() {
         }
 
         nicknameModal.classList.remove('hidden');
+        nicknameModal.classList.add('flex');
         nicknameInput.focus();
 
         const confirm = () => {
@@ -169,6 +170,7 @@ function showNicknameModal() {
             nicknameError.classList.add('hidden');
             sessionStorage.setItem('velo_nickname', val);
             nicknameModal.classList.add('hidden');
+            nicknameModal.classList.remove('flex');
             resolve(val);
         };
 
