@@ -266,8 +266,12 @@ function registerSocketEvents() {
                 consumers.delete(id);
                 if (consumer.kind === 'video' && remoteVideo.srcObject) {
                     remoteVideo.srcObject.removeTrack(consumer.track);
-                } else if (consumer.kind === 'audio' && remoteVideo.srcObject) {
-                    remoteVideo.srcObject.removeTrack(consumer.track);
+                } else if (consumer.kind === 'audio') {
+                    if (consumer.appData && consumer.appData.audioEl) {
+                        consumer.appData.audioEl.remove();
+                    } else if (remoteVideo.srcObject) {
+                        remoteVideo.srcObject.removeTrack(consumer.track);
+                    }
                 }
             }
         }
@@ -654,28 +658,36 @@ async function consumeProducer(producerId) {
             }, 30000);
         }
 
-        // Add track to remote video (works for both video and audio)
-        if (remoteVideo.srcObject) {
-            remoteVideo.srcObject.addTrack(consumer.track);
-        } else {
-            remoteVideo.srcObject = new MediaStream([consumer.track]);
+        if (params.kind === 'video') {
+            if (remoteVideo.srcObject) {
+                remoteVideo.srcObject.addTrack(consumer.track);
+            } else {
+                remoteVideo.srcObject = new MediaStream([consumer.track]);
+            }
+            remoteVideo.playsInline = true;
+            remoteVideo.addEventListener('stalled', () => {
+                if (videoConsumer) socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
+            });
+            if (!consumer._autoPlaySet) {
+                consumer._autoPlaySet = true;
+                remoteVideo.addEventListener('loadeddata', () => autoPlayVideo(), { once: true });
+            }
+        } else if (params.kind === 'audio') {
+            const audioEl = document.createElement('audio');
+            audioEl.id = `audio-consumer-${consumer.id}`;
+            audioEl.autoplay = true;
+            audioEl.playsInline = true;
+            if (volumeSlider) audioEl.volume = volumeSlider.value;
+            audioEl.muted = remoteVideo.muted;
+            audioEl.srcObject = new MediaStream([consumer.track]);
+            document.body.appendChild(audioEl);
+            consumer.appData = { ...consumer.appData, audioEl };
         }
-
-        remoteVideo.playsInline = true;
-
-        remoteVideo.addEventListener('stalled', () => {
-            if (videoConsumer) socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
-        });
 
         waitingOverlay.classList.add('hidden');
         pausedOverlay.classList.add('hidden');
 
         socket.emit('resume', { consumerId: consumer.id });
-
-        if (params.kind === 'video' && !consumer._autoPlaySet) {
-            consumer._autoPlaySet = true;
-            remoteVideo.addEventListener('loadeddata', () => autoPlayVideo(), { once: true });
-        }
     });
 }
 
@@ -1110,9 +1122,21 @@ btnMute?.addEventListener('click', () => {
     remoteVideo.muted = !remoteVideo.muted;
     iconVolumeOn.classList.toggle('hidden', remoteVideo.muted);
     iconVolumeOff.classList.toggle('hidden', !remoteVideo.muted);
+    for (const [id, consumer] of consumers) {
+        if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
+            consumer.appData.audioEl.muted = remoteVideo.muted;
+        }
+    }
 });
 
-volumeSlider?.addEventListener('input', (e) => { remoteVideo.volume = e.target.value; });
+volumeSlider?.addEventListener('input', (e) => { 
+    remoteVideo.volume = e.target.value; 
+    for (const [id, consumer] of consumers) {
+        if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
+            consumer.appData.audioEl.volume = e.target.value;
+        }
+    }
+});
 
 btnFullscreen?.addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen();
