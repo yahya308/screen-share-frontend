@@ -1,25 +1,25 @@
 {
-  "name": "velostream",
+  "name": "screen-share-frontend",
   "version": "2.0.0",
-  "description": "VELOSTREAM - High-Performance Screen Sharing Platform (WebRTC + Mediasoup SFU)",
+  "description": "VELOSTREAM - High-Performance Screen Sharing Platform Frontend",
   "private": true,
   "scripts": {
-    "start": "cd backend && node server.js",
-    "dev": "cd backend && nodemon server.js",
+    "build": "echo 'Static HTML frontend build successfully completed'",
+    "start": "npx serve public",
+    "dev": "npx serve public",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
-    "nodemon": "^3.0.1"
+    "serve": "^14.2.1"
   },
   "keywords": [
     "webrtc",
-    "mediasoup",
     "screen-share",
     "sfu",
     "streaming",
-    "nodejs"
+    "frontend"
   ],
   "author": "yahya308",
   "license": "MIT",
