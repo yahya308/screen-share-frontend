@@ -7,8 +7,7 @@
     "start": "cd backend && node server.js",
     "dev": "cd backend && nodemon server.js",
     "lint": "eslint . --ext .js",
-    "lint:fix": "eslint . --ext .js --fix",
-    "vercel-build": "echo 'Static frontend — no build needed'"
+    "lint:fix": "eslint . --ext .js --fix"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
