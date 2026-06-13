@@ -63,3 +63,7 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+
+# Project-specific generated files
+fallow_output.json
+*.patch

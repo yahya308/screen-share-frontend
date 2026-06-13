@@ -34,9 +34,15 @@ let viewerMicTrack   = null;   // Viewer mic track
 let audioContext     = null;
 const consumers      = new Map(); // consumerId -> consumer
 
+// Audio oynatma state'i — video mute'tan BAĞIMSIZ (B4 düzeltmesi)
+let audioMutedState  = false;
+// Autoplay politikası yüzünden bekleyen (henüz çalamayan) audio elementleri (B2a)
+const pendingAudioElements = new Set();
+
 let isAdmin          = false;
 let myNickname       = '';
 let mySocketId       = '';
+let adminSocketId    = null;   // U1: yayın sahibi konuşunca video kenarını vurgula
 
 let viewerMicEnabled = true;  // Can viewers use mic? (admin controls this)
 let chatEnabled      = true;  // Is chat open? (admin controls this)
@@ -193,7 +199,12 @@ async function initSocket(nickname) {
     const config = await getConfig();
     const signalingUrl = config.signalingUrl || window.location.origin;
 
-    socket = io(signalingUrl);
+    socket = io(signalingUrl, {
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000
+    });
     myNickname = nickname;
 
     registerSocketEvents();
@@ -234,8 +245,17 @@ async function initSocket(nickname) {
         }
     });
 
-    socket.on('disconnect', () => {
-        showToast('Sunucu bağlantısı kesildi');
+    socket.on('disconnect', (reason) => {
+        showToast('Sunucu bağlantısı kesildi, yeniden bağlanılıyor...', 'warning');
+    });
+
+    // V4/U5: Yeniden bağlanınca bilgilendir (connect handler zaten yeniden join yapar)
+    socket.io.on('reconnect', () => {
+        showToast('Yeniden bağlandı', 'success');
+    });
+
+    socket.io.on('reconnect_attempt', () => {
+        // sessizce deniyoruz
     });
 }
 
@@ -248,7 +268,11 @@ function registerSocketEvents() {
     socket.on('user-list', (users) => renderUserList(users));
 
     // Mediasoup events
-    socket.on('new-producer', (producerId) => consumeProducer(producerId));
+    // new-producer artık { id, kind, source } objesi gönderiyor (eski id-only ile uyumlu)
+    socket.on('new-producer', (data) => {
+        const producerId = typeof data === 'object' ? data.id : data;
+        consumeProducer(producerId, typeof data === 'object' ? data : null);
+    });
 
     socket.on('stream-started', () => {
         waitingOverlay.classList.add('hidden');
@@ -260,19 +284,11 @@ function registerSocketEvents() {
     socket.on('stream-paused', () => pausedOverlay.classList.remove('hidden'));
 
     socket.on('producer-closed', ({ remoteProducerId }) => {
-        for (const [id, consumer] of consumers) {
+        // B2b: Bu artık backup görevi görür — asıl temizlik consumer'ın
+        // 'producerclose' event'inde (attachConsumerCleanup) yapılır.
+        for (const [id, consumer] of [...consumers]) {
             if (consumer.producerId === remoteProducerId) {
-                consumer.close();
-                consumers.delete(id);
-                if (consumer.kind === 'video' && remoteVideo.srcObject) {
-                    remoteVideo.srcObject.removeTrack(consumer.track);
-                } else if (consumer.kind === 'audio') {
-                    if (consumer.appData && consumer.appData.audioEl) {
-                        consumer.appData.audioEl.remove();
-                    } else if (remoteVideo.srcObject) {
-                        remoteVideo.srcObject.removeTrack(consumer.track);
-                    }
-                }
+                closeAndRemoveConsumer(consumer);
             }
         }
     });
@@ -435,6 +451,12 @@ function setupViewerUI() {
     viewerControls.classList.remove('hidden');
     localVideo.classList.add('hidden');
     remoteVideo.classList.remove('hidden');
+
+    // U4: İzleyiciler için de çıkış uyarısı
+    window.addEventListener('beforeunload', (e) => {
+        e.preventDefault();
+        e.returnValue = '';
+    });
 }
 
 // ==================== USER LIST ====================
@@ -445,6 +467,10 @@ function renderUserList(users) {
     userCountBadge.textContent = users.length;
     userCount.textContent = users.length;
     userListContainer.innerHTML = '';
+
+    // U1: Admin socket ID'sini bul (video speaking göstergesi için)
+    const admin = users.find(u => u.role === 'admin');
+    adminSocketId = admin ? admin.socketId : null;
 
     users.forEach(user => {
         const isMe = user.socketId === mySocketId;
@@ -487,6 +513,12 @@ function updateSpeakingIndicator(socketId, speaking) {
     if (!el) return;
     if (speaking) el.classList.remove('hidden');
     else el.classList.add('hidden');
+
+    // U1: Yayın sahibi (admin) konuşuyorsa video alanında konuşma halkası göster
+    if (socketId === adminSocketId && videoContainer) {
+        if (speaking) videoContainer.classList.add('speaking-ring');
+        else videoContainer.classList.remove('speaking-ring');
+    }
 }
 
 // Kick / Ban (called from HTML onclick)
@@ -510,9 +542,42 @@ window.banUser = function(targetSocketId) {
 
 // ==================== MEDIASOUP ====================
 
+/**
+ * Tüm mediasoup state'ini (consumer, transport, audio element, device) temizler.
+ * Yeniden bağlanma (reconnect) ve yeniden init durumlarında eski/çift element
+ * birikmesini önler (V4/U5).
+ */
+function resetMediaState() {
+    // Bekleyen autoplay elementlerini temizle
+    pendingAudioElements.clear();
+    // Tüm consumer'ları ve audio elementlerini kapat
+    for (const [, consumer] of [...consumers]) {
+        closeAndRemoveConsumer(consumer);
+    }
+    consumers.clear();
+    videoConsumer = null;
+    // Transport'ları kapat
+    try { if (producerTransport) producerTransport.close(); } catch (e) {}
+    try { if (consumerTransport) consumerTransport.close(); } catch (e) {}
+    try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) {}
+    producerTransport = consumerTransport = viewerSendTransport = null;
+    // Device'ı sıfırla (yeniden load edilebilmesi için)
+    device = null;
+    // Video alanını temizle
+    if (remoteVideo.srcObject) {
+        try { remoteVideo.srcObject.getTracks().forEach(t => t.stop()); } catch (e) {}
+        remoteVideo.srcObject = null;
+    }
+    // Konuşma göstergesini sıfırla
+    if (videoContainer) videoContainer.classList.remove('speaking-ring');
+}
+
 async function initMediasoup() {
     socket.emit('getRouterRtpCapabilities', async (rtpCapabilities) => {
         if (rtpCapabilities.error) { showToast(rtpCapabilities.error); return; }
+
+        // Cihaz zaten yüklüyse (reconnect / yeniden giriş) eski state'i temizle
+        if (device) resetMediaState();
 
         device = new Device();
         await device.load({ routerRtpCapabilities: rtpCapabilities });
@@ -622,7 +687,7 @@ function getProducers() {
     });
 }
 
-async function consumeProducer(producerId) {
+async function consumeProducer(producerId, meta = null) {
     if (!consumerTransport) return;
 
     socket.emit('consume', {
@@ -640,6 +705,11 @@ async function consumeProducer(producerId) {
         });
 
         consumers.set(consumer.id, consumer);
+
+        // B2b: Producer kapanınca veya track biterse consumer'ı + DOM elementini
+        // GÜVENLE temizle. Sadece socket 'producer-closed' event'ine güvenmek
+        // yarış koşullarına (stale/eksik audio element) yol açıyordu.
+        attachConsumerCleanup(consumer);
 
         if (params.kind === 'video') {
             videoConsumer = consumer;
@@ -668,15 +738,19 @@ async function consumeProducer(producerId) {
                 remoteVideo.addEventListener('loadeddata', () => autoPlayVideo(), { once: true });
             }
         } else if (params.kind === 'audio') {
+            // B2a/B4: Audio elementi bağımsız state ile oluştur ve KESİNLİKLE play() çağır
             const audioEl = document.createElement('audio');
             audioEl.id = `audio-consumer-${consumer.id}`;
             audioEl.autoplay = true;
             audioEl.playsInline = true;
-            if (volumeSlider) audioEl.volume = volumeSlider.value;
-            audioEl.muted = remoteVideo.muted;
+            audioEl.volume = volumeSlider ? parseFloat(volumeSlider.value) : 1;
+            // Video mute'una BAĞLANMIYOR — bağımsız audioMutedState (B4)
+            audioEl.muted = audioMutedState;
             audioEl.srcObject = new MediaStream([consumer.track]);
             document.body.appendChild(audioEl);
-            consumer.appData = { ...consumer.appData, audioEl };
+            consumer.appData = { ...(consumer.appData || {}), audioEl, source: meta?.source || null };
+            // Hemen play() dene — autoplay reddedilirse playAudioElement() handle eder
+            playAudioElement(audioEl);
         }
 
         waitingOverlay.classList.add('hidden');
@@ -684,6 +758,106 @@ async function consumeProducer(producerId) {
 
         socket.emit('resume', { consumerId: consumer.id });
     });
+}
+
+/**
+ * Bir audio elementini güvenli şekilde çalmaya çalışır.
+ * Tarayıcı autoplay politikası reddederse: sessiz modda çal, sonra ilk kullanıcı
+ * etkileşiminde gerçek (sesli) oynatmaya geç. (B2a düzeltmesi)
+ */
+function playAudioElement(audioEl) {
+    if (!audioEl) return;
+    audioEl.play().then(() => {
+        // Başarılı — bekleme listesinden çıkar
+        pendingAudioElements.delete(audioEl);
+    }).catch((err) => {
+        console.warn('⚠️ Audio autoplay engellendi, sessiz modda deneniyor:', err.name);
+        // Sessiz modda (mute) çal — bu neredeyse her zaman kabul edilir
+        audioEl.muted = true;
+        audioEl.play().then(() => {
+            pendingAudioElements.add(audioEl);
+        }).catch((e2) => {
+            console.warn('⚠️ Audio sessiz modda da çalınamadı, etkileşim bekleniyor:', e2.name);
+            pendingAudioElements.add(audioEl);
+        });
+    });
+}
+
+/**
+ * İlk kullanıcı etkileşiminde bekleyen tüm audio elementlerini sesli çalmaya geç.
+ * (autoplay politikasını aşmanın resmi yöntemi)
+ */
+function resumePendingAudio() {
+    if (!pendingAudioElements.size) return;
+    pendingAudioElements.forEach((audioEl) => {
+        audioEl.muted = audioMutedState; // kullanıcının tercih ettiği mute durumuna dön
+        if (!audioMutedState) {
+            audioEl.play().then(() => {
+                pendingAudioElements.delete(audioEl);
+            }).catch(() => { /* hâlâ engelleniyorsa beklemede kal */ });
+        } else {
+            pendingAudioElements.delete(audioEl);
+        }
+    });
+}
+
+// İlk etkileşimde (click/touch/keydown) bekleyen sesleri aç
+function setupAudioGestureUnlock() {
+    const unlock = () => resumePendingAudio();
+    ['click', 'touchstart', 'keydown'].forEach(evt =>
+        document.addEventListener(evt, unlock, { once: false, passive: true }));
+}
+setupAudioGestureUnlock();
+
+/**
+ * Bir consumer'ı tamamen kapat ve DOM/Map temizliğini yap.
+ * Hem producer-closed socket event'inde hem de mediasoup event'lerinde kullanılır.
+ */
+function closeAndRemoveConsumer(consumer) {
+    if (!consumer) return;
+    const wasInMap = consumers.delete(consumer.id);
+    if (videoConsumer === consumer) videoConsumer = null;
+
+    if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
+        const el = consumer.appData.audioEl;
+        pendingAudioElements.delete(el);
+        try { el.pause(); } catch (e) {}
+        try { el.srcObject = null; } catch (e) {}
+        el.remove();
+        consumer.appData.audioEl = null;
+    } else if (consumer.kind === 'video' && remoteVideo.srcObject) {
+        try { remoteVideo.srcObject.removeTrack(consumer.track); } catch (e) {}
+    }
+
+    if (wasInMap) { try { consumer.close(); } catch (e) {} }
+}
+
+/**
+ * Bir consumer kapanınca (producer kapandı / track bitti / transport kapandı)
+ * audio elementini ve consumers Map'ini güvenle temizle. (B2b düzeltmesi)
+ */
+function attachConsumerCleanup(consumer) {
+    const cleanup = () => closeAndRemoveConsumer(consumer);
+    consumer.on('producerclose', cleanup);
+    consumer.on('trackended', cleanup);
+    consumer.on('transportclose', cleanup);
+}
+
+/**
+ * Tüm (video + audio) elementlerin mute/volume durumunu tek tutarlı state ile
+ * senkronize et. (B4 düzeltmesi)
+ */
+function syncAllAudioElements() {
+    for (const [, consumer] of consumers) {
+        if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
+            consumer.appData.audioEl.muted = audioMutedState;
+            if (volumeSlider) consumer.appData.audioEl.volume = parseFloat(volumeSlider.value);
+            // Eğer daha önce autoplay yüzünden beklemedeyse ve artık çalması gerekiyorsa
+            if (!audioMutedState && consumer.appData.audioEl.paused) {
+                playAudioElement(consumer.appData.audioEl);
+            }
+        }
+    }
 }
 
 // ==================== ADMIN: STREAM CONTROLS ====================
@@ -741,21 +915,25 @@ async function startStream() {
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
             systemAudioTrack = audioTrack;
-            if (producerTransport) {
-                systemAudioProducer = await producerTransport.produce({
-                    track: systemAudioTrack,
-                    codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 128000 },
-                    appData: { source: 'admin-sys-audio' }
-                });
-            }
-            btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
+            // DTX kapalı (B3) — sistem sesinde (müzik/film) DTX kaliteyi bozar
+            systemAudioProducer = await producerTransport.produce({
+                track: systemAudioTrack,
+                codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+                appData: { source: 'admin-sys-audio' }
+            });
+            updateAdminAudioButton(true);
         }
 
-        btnStartStream.classList.add('hidden');
-        btnStopStream.classList.remove('hidden');
-        showToast('Yayın başladı', 'success');
-        startStatsLoop(true);
-        statsStarted = true;
+            btnStartStream.classList.add('hidden');
+            btnStopStream.classList.remove('hidden');
+            showToast('Yayın başlandı', 'success');
+            startStatsLoop(true);
+            statsStarted = true;
+
+            // B1 DÜZELTMESİ: Yayın başlamadan önce açılmış mikrofon varsa, artık
+            // producerTransport hazır → producer'ı oluştur ki ses izleyicilere gitsin.
+            // (startStream başında micProducer=null yapılmıştı, micTrack hâlâ canlı.)
+            await republishAdminMic();
     } catch (err) {
         console.error('Stream error:', err);
         showToast('Yayın başlatılamadı: ' + err.message);
@@ -780,16 +958,51 @@ function stopStream() {
 
     btnStartStream.classList.remove('hidden');
     btnStopStream.classList.add('hidden');
-    btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Kapalı)';
-    btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
+    updateAdminMicButton(false);
+    updateAdminAudioButton(false);
     showToast('Yayın durduruldu');
+}
+
+/**
+ * Admin mikrofon producer'ını (gerekirse) oluştur/yeniden yayınla.
+ * B1 DÜZELTMESİ: Mikrofon yayın başlamadan önce açıldıysa producerTransport henüz
+ * yoktu ve micProducer hiç oluşmuyordu. Bu fonksiyon, transport hazır olduktan
+ * sonra (startStream sonunda veya transport gelince) eksik producer'ı kurar.
+ */
+async function republishAdminMic() {
+    // Mikrofon track'i yoksa veya producer zaten varsa bir şey yapma
+    if (!micTrack || micProducer) return;
+
+    // Transport hazır olmayabilir (startStream → initMediasoup yarışı).
+    // Birkaç kez bekle ve tekrar dene.
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    for (let attempt = 0; attempt < 10; attempt++) {
+        if (producerTransport && !producerTransport.closed && device) break;
+        await wait(200);
+    }
+    if (!producerTransport || producerTransport.closed) {
+        console.warn('⚠️ republishAdminMic: producerTransport hazır olmadı, mikrofon beklemeye alındı');
+        return;
+    }
+    try {
+        micProducer = await producerTransport.produce({
+            track: micTrack,
+            codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 64000 },
+            appData: { source: 'admin-mic' }
+        });
+        console.log('🎤 Admin mic producer oluşturuldu:', micProducer.id);
+    } catch (err) {
+        console.error('Admin mic republish hatası:', err);
+        showToast('Mikrofon yayını başlatılamadı');
+    }
 }
 
 // Admin's own mic toggle
 btnToggleMic.addEventListener('click', async () => {
     if (micTrack) {
+        // --- Mikrofonu KAPAT ---
         micTrack.stop(); micTrack = null;
-        btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Kapalı)';
+        updateAdminMicButton(false);
         if (micProducer) {
             socket.emit('producer-closing', { producerId: micProducer.id });
             try { micProducer.close(); } catch(e) {}
@@ -797,51 +1010,107 @@ btnToggleMic.addEventListener('click', async () => {
         }
         stopVAD();
     } else {
+        // --- Mikrofonu AÇ ---
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 } });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,    // A4: explicit AGC
+                    sampleRate: 48000,
+                    channelCount: 1
+                }
+            });
             micTrack = stream.getAudioTracks()[0];
-            btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Açık)';
-            if (producerTransport) {
-                micProducer = await producerTransport.produce({
-                    track: micTrack,
-                    codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 48000 },
-                    appData: { source: 'admin-mic' }
-                });
-            }
+            updateAdminMicButton(true);
+            // Producer'ı oluştur (transport varsa). Yoksa startStream sonunda
+            // republishAdminMic() ile tamamlanacak (B1 düzeltmesi).
+            await republishAdminMic();
             setupVAD(stream);
         } catch (err) {
-            showToast('Mikrofon erişimi başarısız');
+            console.error('Mic error:', err);
+            showToast('Mikrofon erişimi başarısız: ' + (err.message || ''));
         }
     }
 });
 
+/** Admin mikrofon butonu için net görsel state (U2) */
+function updateAdminMicButton(on) {
+    if (!btnToggleMic) return;
+    if (on) {
+        btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Açık)';
+        btnToggleMic.className = 'w-full py-1.5 bg-red-600/60 hover:bg-red-600 rounded-lg text-xs transition-colors font-medium';
+    } else {
+        btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Kapalı)';
+        btnToggleMic.className = 'w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors';
+    }
+}
+
+/**
+ * Sistem sesi producer'ını (gerekirse) oluştur. Mevcut track'i yeniden kullanır
+ * böylece tekrar ekran paylaşım izin diyaloğu çıkmaz (U3 düzeltmesi).
+ */
+async function republishSystemAudio() {
+    if (!systemAudioTrack || systemAudioProducer) return;
+    if (!producerTransport || producerTransport.closed) return;
+    try {
+        systemAudioProducer = await producerTransport.produce({
+            track: systemAudioTrack,
+            codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+            appData: { source: 'admin-sys-audio' }
+        });
+        console.log('🔊 System audio producer:', systemAudioProducer.id);
+    } catch (err) {
+        console.error('System audio republish hatası:', err);
+    }
+}
+
+/** Admin sistem sesi butonu için net görsel state (U2) */
+function updateAdminAudioButton(on) {
+    if (!btnToggleAudio) return;
+    if (on) {
+        btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
+        btnToggleAudio.className = 'w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium';
+    } else {
+        btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
+        btnToggleAudio.className = 'w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors';
+    }
+}
+
 // Admin's system audio toggle
 btnToggleAudio.addEventListener('click', async () => {
-    if (systemAudioTrack) {
-        systemAudioTrack.stop(); systemAudioTrack = null;
-        btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
-        if (systemAudioProducer) {
-            socket.emit('producer-closing', { producerId: systemAudioProducer.id });
-            try { systemAudioProducer.close(); } catch(e) {}
-            systemAudioProducer = null;
-        }
+    if (systemAudioProducer) {
+        // --- Sistem sesini KAPAT ---
+        // U3: track'i durdurma — sadece producer'ı kapat. Böylece tekrar açarken
+        // yeniden getDisplayMedia çağrılmaz (kullanıcıyı tekrar prompt etmez).
+        socket.emit('producer-closing', { producerId: systemAudioProducer.id });
+        try { systemAudioProducer.close(); } catch(e) {}
+        systemAudioProducer = null;
+        updateAdminAudioButton(false);
     } else {
-        try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-            stream.getVideoTracks().forEach(t => t.stop());
-            const track = stream.getAudioTracks()[0];
-            if (track) {
-                systemAudioTrack = track;
-                btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
-                if (producerTransport) {
-                    systemAudioProducer = await producerTransport.produce({
-                        track: systemAudioTrack,
-                        codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 1, opusMaxAverageBitrate: 128000 },
-                        appData: { source: 'admin-sys-audio' }
-                    });
+        // --- Sistem sesini AÇ ---
+        // Önce mevcut (canlı) track'i dene — prompt yok (U3)
+        if (systemAudioTrack && systemAudioTrack.readyState === 'live') {
+            updateAdminAudioButton(true);
+            await republishSystemAudio();
+        } else {
+            // Track yoksa (ör. ekran paylaşımı sırasında hiç ses verilmedi) — fallback
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+                stream.getVideoTracks().forEach(t => t.stop());
+                const track = stream.getAudioTracks()[0];
+                if (track) {
+                    systemAudioTrack = track;
+                    updateAdminAudioButton(true);
+                    await republishSystemAudio();
+                } else {
+                    showToast('Sistem sesi bulunamadı (tarayıcı/sistem ses paylaşımı desteklemiyor olabilir)');
                 }
+            } catch (err) {
+                console.error(err);
+                showToast('Sistem sesi alınamadı');
             }
-        } catch (err) { console.error(err); }
+        }
     }
 });
 
@@ -919,7 +1188,13 @@ async function openViewerMic() {
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000, channelCount: 1 }
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,    // A4: explicit AGC
+                sampleRate: 48000,
+                channelCount: 1
+            }
         });
         viewerMicTrack = stream.getAudioTracks()[0];
 
@@ -942,8 +1217,8 @@ async function openViewerMic() {
             codecOptions: {
                 opusStereo: 0,
                 opusFec: 1,
-                opusDtx: 1,
-                opusMaxAverageBitrate: 48000     // 48kbps for voice
+                opusDtx: 0,                      // B3: DTX kapalı — gürültü/kesik yok
+                opusMaxAverageBitrate: 64000     // 64kbps voice (netlik için 48→64)
             },
             appData: { source: 'viewer-mic' }
         });
@@ -1013,7 +1288,15 @@ function setupVAD(stream) {
                 sum += v * v;
             }
             const rms = Math.sqrt(sum / dataArr.length);
-            const speaking = rms > 0.015;
+
+            // A5: Histeresisli VAD — konuşma BAŞLAMA eşiği daha yüksek (0.025),
+            // BITME eşiği daha düşük (0.012). Böylece fan/klavye gibi sürekli
+            // düşük gürültü "konuşuyor" tetiklemez ve göstergenin titremesi engellenir.
+            const startThreshold = 0.025;
+            const stopThreshold = 0.012;
+            let speaking = vadWasSpeaking;
+            if (!speaking && rms > startThreshold) speaking = true;
+            else if (speaking && rms < stopThreshold) speaking = false;
 
             if (speaking !== vadWasSpeaking) {
                 vadWasSpeaking = speaking;
@@ -1114,23 +1397,22 @@ btnPlayPause?.addEventListener('click', async () => {
 });
 
 btnMute?.addEventListener('click', () => {
-    remoteVideo.muted = !remoteVideo.muted;
-    iconVolumeOn.classList.toggle('hidden', remoteVideo.muted);
-    iconVolumeOff.classList.toggle('hidden', !remoteVideo.muted);
-    for (const [id, consumer] of consumers) {
-        if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
-            consumer.appData.audioEl.muted = remoteVideo.muted;
-        }
-    }
+    audioMutedState = !audioMutedState;
+    remoteVideo.muted = audioMutedState;
+    iconVolumeOn.classList.toggle('hidden', audioMutedState);
+    iconVolumeOff.classList.toggle('hidden', !audioMutedState);
+    // B4: tüm audio elementleri tek tutarlı state ile senkronize
+    syncAllAudioElements();
+    // Kullanıcı manuel unmute yaptıysa bekleyen autoplay audio'larını da aç
+    if (!audioMutedState) resumePendingAudio();
 });
 
-volumeSlider?.addEventListener('input', (e) => { 
-    remoteVideo.volume = e.target.value; 
-    for (const [id, consumer] of consumers) {
-        if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
-            consumer.appData.audioEl.volume = e.target.value;
-        }
-    }
+volumeSlider?.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    remoteVideo.volume = v;
+    // Seviyeyi kaydet (A8)
+    try { localStorage.setItem('velo_volume', String(v)); } catch (e2) {}
+    syncAllAudioElements();
 });
 
 btnFullscreen?.addEventListener('click', () => {
@@ -1159,18 +1441,31 @@ function startStatsLoop(isSender) {
     const pc = isSender ? producerTransport?.handler?._pc : consumerTransport?.handler?._pc;
     if (!pc) return;
 
+    // V8: Ses için ayrı delta takibi
+    let lastAudioStats = { timestamp: 0, bytes: 0 };
+
     statsInterval = setInterval(async () => {
         try {
             const stats = await pc.getStats();
             let bytes = 0, fps = 0, packetsLost = 0, packetsTotal = 0, jitter = 0, rtt = 0;
+            // Ses metrikleri
+            let audioBytes = 0, audioPacketsLost = 0, audioPacketsTotal = 0, audioJitter = 0;
 
             stats.forEach((report) => {
-                if (report.type === (isSender ? 'outbound-rtp' : 'inbound-rtp') && report.kind === 'video') {
+                const type = isSender ? 'outbound-rtp' : 'inbound-rtp';
+                if (report.type === type && report.kind === 'video') {
                     bytes = report.bytesSent || report.bytesReceived || bytes;
                     fps = report.framesPerSecond || fps;
                     packetsLost = report.packetsLost || packetsLost;
                     packetsTotal = (report.packetsLost || 0) + (report.packetsReceived || 0);
                     jitter = report.jitter || jitter;
+                }
+                // V8: Ses metriklerini de topla
+                if (report.type === type && report.kind === 'audio') {
+                    audioBytes = report.bytesSent || report.bytesReceived || 0;
+                    audioPacketsLost = report.packetsLost || 0;
+                    audioPacketsTotal = (report.packetsLost || 0) + (report.packetsReceived || report.packetsSent || 0);
+                    audioJitter = report.jitter || 0;
                 }
                 if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime) {
                     rtt = report.currentRoundTripTime;
@@ -1186,11 +1481,36 @@ function startStatsLoop(isSender) {
             }
             lastStats = { timestamp: now, bytes };
 
+            // V8: Ses bitrate hesabı
+            let audioBitrateKbps = 0;
+            if (lastAudioStats.timestamp) {
+                const dMs = now - lastAudioStats.timestamp;
+                const dB = audioBytes - lastAudioStats.bytes;
+                if (dMs > 0) audioBitrateKbps = Math.max(0, Math.round((dB * 8) / dMs));
+            }
+            lastAudioStats = { timestamp: now, bytes: audioBytes };
+
             if (statsBitrate) statsBitrate.textContent = `${bitrateKbps} kbps`;
             if (statsFps) statsFps.textContent = fps ? `${Math.round(fps)} fps` : '-';
             if (statsRtt) statsRtt.textContent = rtt ? `${Math.round(rtt * 1000)} ms` : '-';
             if (statsLoss) statsLoss.textContent = packetsTotal ? `${Math.round((packetsLost / packetsTotal) * 100)}%` : '0%';
             if (statsJitter) statsJitter.textContent = jitter ? `${Math.round(jitter * 1000)} ms` : '-';
+
+            // V8: Ses metriklerini güncelle (HTML elementleri varsa)
+            const aBitrate = document.getElementById('statsAudioBitrate');
+            const aLoss = document.getElementById('statsAudioLoss');
+            const aJitter = document.getElementById('statsAudioJitter');
+            if (aBitrate) aBitrate.textContent = audioBytes ? `${audioBitrateKbps} kbps` : '-';
+            if (aLoss) aLoss.textContent = audioPacketsTotal ? `${Math.round((audioPacketsLost / audioPacketsTotal) * 100)}%` : '0%';
+            if (aJitter) aJitter.textContent = audioJitter ? `${Math.round(audioJitter * 1000)} ms` : '-';
+
+            // U7: Düşük kalite uyarısı — yüksek paket kaybı tespit edilirse kullanıcı bilgilendir
+            const videoLossPct = packetsTotal ? (packetsLost / packetsTotal) * 100 : 0;
+            const now2 = Date.now();
+            if (videoLossPct > 8 && (!showToast._lastLowQualityWarn || now2 - showToast._lastLowQualityWarn > 15000)) {
+                showToast._lastLowQualityWarn = now2;
+                showToast('Bağlantı zayıf görünüyor, görüntü kalitesi düşebilir', 'warning');
+            }
         } catch (e) {}
     }, 2000);
 }
@@ -1233,8 +1553,10 @@ async function autoPlayVideo() {
         await remoteVideo.play();
         updatePlayPauseIcon(true);
     } catch {
+        // Video autoplay policy yüzünden reddedilirse sessiz modda dene.
+        // Ses ayrı <audio> elementlerinde bağımsız çaldığı için bu sadece video'yu etkiler.
         remoteVideo.muted = true;
-        try { await remoteVideo.play(); updatePlayPauseIcon(true); showToast('Ses kapatılarak başlatıldı', 'warning'); }
+        try { await remoteVideo.play(); updatePlayPauseIcon(true); showToast('Görüntü başlatıldı (ses için sayfaya tıklayın)', 'warning'); }
         catch { updatePlayPauseIcon(false); }
     }
 }
@@ -1285,6 +1607,18 @@ btnConfirmLeave?.addEventListener('click', () => {
 // ==================== ENTRY POINT ====================
 
 (async () => {
+    // A8: Kayıtlı ses seviyesini geri yükle
+    try {
+        const savedVol = localStorage.getItem('velo_volume');
+        if (savedVol !== null && volumeSlider) {
+            const v = parseFloat(savedVol);
+            if (!isNaN(v)) {
+                volumeSlider.value = String(v);
+                remoteVideo.volume = v;
+            }
+        }
+    } catch (e) {}
+
     const nickname = await showNicknameModal();
     myNickname = nickname;
     await initSocket(nickname);

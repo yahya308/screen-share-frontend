@@ -30,13 +30,17 @@ module.exports = {
                     kind: 'audio',
                     mimeType: 'audio/opus',
                     clockRate: 48000,        // ⭐ CD kalitesi (48kHz)
-                    channels: 2,             // ⭐ Stereo
+                    channels: 2,             // ⭐ Stereo (sistem sesi için)
                     parameters: {
                         useinbandfec: 1,     // ⭐ Forward Error Correction (paket kaybı telafisi)
-                        usedtx: 1,           // ⭐ Discontinuous Transmission (sessizlikte tasarruf)
+                        usedtx: 0,           // ⭐ DTX KAPALI — sabit olmayan ortam gürültüsünde
+                                             //   periyodik gürültü patlamaları ve "ön-kesik" yapar
+                                             //   (bkz. Opus issue #89). Bant tasarrufu, ses kalitesine
+                                             //   ve tutarlılığa değmez.
                         maxaveragebitrate: 128000,  // ⭐ 128 kbps yüksek kalite
-                        stereo: 1,           // ⭐ Stereo garantisi
+                        stereo: 1,           // ⭐ Stereo garantisi (sistem sesi)
                         'sprop-stereo': 1,   // ⭐ Sender stereo bildirimi
+                        ptime: 20,           // ⭐ 20ms paket boyutu (düşük gecikme + tutarlı)
                         cbr: 0               // ⭐ VBR (Variable Bitrate) - daha verimli
                     }
                 },
@@ -100,7 +104,9 @@ module.exports = {
             enableTcp: true,
             preferUdp: true,
             // ⭐ Smooth streaming optimizations
-            minimumAvailableOutgoingBitrate: 3000000  // Never go below 3 Mbps
+            // Düşürüldü: 3 Mbps taban, zayıf/mobil bağlantıda mediasoup'un adaptive
+            // bandwidth control'üne engel oluyordu ve paket kaybına yol açıyordu.
+            minimumAvailableOutgoingBitrate: 1500000  // 1.5 Mbps taban (uyumlu adaptasyon)
         }
     },
 

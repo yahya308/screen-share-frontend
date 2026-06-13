@@ -530,7 +530,12 @@ io.on('connection', (socket) => {
             callback({ id: producer.id });
 
             // Notify all others of new producer (works for admin screen + viewer mic)
-            socket.to(socketData.roomId).emit('new-producer', producer.id);
+            // kind + source bilgisini de gönderelim ki client (audio/video) ayırabilsin
+            socket.to(socketData.roomId).emit('new-producer', {
+                id: producer.id,
+                kind,
+                source: appData?.source || null
+            });
 
         } catch (error) {
             console.error('Produce error:', error);
