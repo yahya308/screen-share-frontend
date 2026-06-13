@@ -1,21 +1,20 @@
 {
-  "name": "screen-share-app",
-  "version": "1.0.0",
-  "description": "Simple WebRTC screen sharing application",
-  "main": "server.dev.js",
+  "name": "velostream",
+  "version": "2.0.0",
+  "description": "VELOSTREAM - High-Performance Screen Sharing Platform (WebRTC + Mediasoup SFU)",
+  "main": "backend/server.js",
   "scripts": {
-    "start": "node server.dev.js",
-    "dev": "nodemon server.dev.js",
+    "start": "cd backend && node server.js",
+    "dev": "cd backend && nodemon server.js",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "vercel-build": "echo 'Build completed'",
-    "vercel-dev": "npm run dev",
-    "render-start": "node server.dev.js"
+    "render-start": "cd backend && node server.js"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
-    "express": "^4.18.2",
-    "socket.io": "^4.7.2"
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
@@ -23,12 +22,15 @@
   },
   "keywords": [
     "webrtc",
+    "mediasoup",
     "screen-share",
+    "sfu",
+    "streaming",
     "nodejs"
   ],
-  "author": "",
+  "author": "yahya308",
   "license": "MIT",
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   }
 }

@@ -12,7 +12,10 @@
             theme: {
                 extend: {
                     colors: {
-                        brand: { 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' }
+                        brand: { 300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
                     }
                 }
             }
@@ -27,254 +30,358 @@
         }
     </script>
     <style>
-        .speaking-ring { box-shadow: 0 0 0 2px #ef4444, 0 0 8px 2px rgba(239,68,68,0.4); }
+        :root { color-scheme: dark; }
+        * { -webkit-tap-highlight-color: transparent; }
+        body { background: radial-gradient(ellipse at top, #0f172a 0%, #020617 60%); }
+
+        .speaking-ring { box-shadow: 0 0 0 3px #ef4444, 0 0 16px 4px rgba(239,68,68,0.45); }
         .chat-msg:last-child { margin-bottom: 0; }
-        #chatMessages::-webkit-scrollbar { width: 4px; }
-        #chatMessages::-webkit-scrollbar-track { background: transparent; }
-        #chatMessages::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-        #userListContainer::-webkit-scrollbar { width: 4px; }
-        #userListContainer::-webkit-scrollbar-track { background: transparent; }
-        #userListContainer::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+        /* Scrollbar */
+        .sidebar-scroll::-webkit-scrollbar, #chatMessages::-webkit-scrollbar, #userListContainer::-webkit-scrollbar { width: 5px; }
+        .sidebar-scroll::-webkit-scrollbar-track, #chatMessages::-webkit-scrollbar-track, #userListContainer::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb, #chatMessages::-webkit-scrollbar-thumb, #userListContainer::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb:hover, #chatMessages::-webkit-scrollbar-thumb:hover { background: #475569; }
         .sidebar-scroll { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+
+        /* Range slider */
+        input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+        input[type="range"]::-webkit-slider-runnable-track { height: 5px; background: #334155; border-radius: 5px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; height: 14px; width: 14px; border-radius: 50%; background: #0ea5e9; margin-top: -4.5px; box-shadow: 0 0 0 3px rgba(14,165,233,0.2); }
+        input[type="range"]::-moz-range-track { height: 5px; background: #334155; border-radius: 5px; }
+        input[type="range"]::-moz-range-thumb { height: 14px; width: 14px; border: none; border-radius: 50%; background: #0ea5e9; }
+
+        /* LIVE pulse */
+        @keyframes livePulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        .live-dot { animation: livePulse 1.5s ease-in-out infinite; }
+
+        /* Video gradient overlays */
+        .video-gradient-bottom { background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%); }
+        .video-gradient-top { background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 100%); }
+
+        /* Quality preset active */
+        .preset-active { background: #0284c7 !important; color: #fff !important; border-color: #38bdf8 !important; }
+
+        /* Smooth transitions on overlays */
+        .overlay-fade { transition: opacity 0.3s ease; }
+
+        /* Conn quality dots */
+        .conn-excellent { background: #22c55e; }
+        .conn-good { background: #eab308; }
+        .conn-poor { background: #ef4444; }
+
+        /* Button active states */
+        .ctrl-btn { transition: all 0.15s ease; }
+        .ctrl-btn:hover { transform: translateY(-1px); }
+        .ctrl-btn:active { transform: translateY(0); }
+
+        /* Modal animation */
+        @keyframes modalIn { from { opacity:0; transform: scale(0.95) translateY(10px); } to { opacity:1; transform: scale(1) translateY(0); } }
+        .modal-anim > div { animation: modalIn 0.2s ease; }
+
+        select option { background: #1e293b; }
+        input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(14,165,233,0.3); }
     </style>
 </head>
 
-<body class="bg-slate-900 text-slate-100 min-h-screen">
+<body class="text-slate-100 min-h-screen">
 
-    <!-- Header -->
-    <header class="bg-slate-800 border-b border-slate-700 px-4 py-3">
-        <div class="max-w-[1600px] mx-auto flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <a href="index.html" class="text-slate-400 hover:text-white transition-colors">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <!-- ==================== HEADER ==================== -->
+    <header class="bg-slate-900/80 backdrop-blur-xl border-b border-slate-700/50 px-4 py-2.5 sticky top-0 z-30">
+        <div class="max-w-[1700px] mx-auto flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                <a href="index.html" class="text-slate-400 hover:text-white transition-colors flex-shrink-0 p-1 rounded-lg hover:bg-slate-700/50">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                     </svg>
                 </a>
-                <h1 id="roomName" class="text-lg font-bold truncate max-w-xs">Oda</h1>
-                <div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-700 rounded-full text-sm">
-                    <svg class="w-3.5 h-3.5 text-brand-500" fill="currentColor" viewBox="0 0 20 20">
+                <h1 id="roomName" class="text-base sm:text-lg font-bold truncate max-w-[120px] sm:max-w-xs">Oda</h1>
+
+                <!-- LIVE badge + timer (shown when streaming) -->
+                <div id="streamStatusBadge" class="hidden items-center gap-1.5 px-2 py-0.5 bg-red-600/20 border border-red-600/40 rounded-full text-xs font-medium">
+                    <span class="w-2 h-2 bg-red-500 rounded-full live-dot"></span>
+                    <span class="text-red-400">CANLI</span>
+                    <span id="streamTimer" class="text-red-300/80 tabular-nums hidden sm:inline">00:00</span>
+                </div>
+
+                <div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-700/50 rounded-full text-sm flex-shrink-0">
+                    <svg class="w-3.5 h-3.5 text-brand-400" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
                     </svg>
-                    <span id="userCount">1</span>
+                    <span id="userCount" class="tabular-nums">1</span>
+                </div>
+
+                <!-- Connection quality indicator -->
+                <div id="connQuality" class="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
+                    <span id="connDot" class="w-2 h-2 rounded-full conn-good"></span>
+                    <span id="connText">İyi</span>
                 </div>
             </div>
 
-            <div class="flex items-center gap-2">
-                <button id="btnInvite" class="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-full text-sm transition-colors">
+            <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                <button id="btnInvite" class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-lg text-xs sm:text-sm transition-all ctrl-btn font-medium">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                     </svg>
-                    Davet
+                    <span class="hidden sm:inline">Davet</span>
                 </button>
-                <button id="btnStats" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-full text-sm transition-colors">
+                <button id="btnStats" class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-xs sm:text-sm transition-all ctrl-btn">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19h16M4 15h7m-7-4h10m-10-4h16" />
                     </svg>
-                    Stats
+                    <span class="hidden sm:inline">Stats</span>
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- Stats Panel -->
-    <div id="statsPanel" class="fixed bottom-4 left-4 bg-slate-800/90 border border-slate-700 rounded-xl p-4 text-sm text-slate-200 hidden z-40">
-        <div class="font-semibold mb-2">Bağlantı İstatistikleri</div>
-        <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+    <!-- ==================== STATS PANEL ==================== -->
+    <div id="statsPanel" class="fixed bottom-4 left-4 bg-slate-800/95 backdrop-blur-xl border border-slate-700 rounded-xl p-4 text-sm text-slate-200 hidden z-40 shadow-2xl">
+        <div class="font-semibold mb-2 flex items-center gap-2">
+            <svg class="w-4 h-4 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+            Bağlantı İstatistikleri
+        </div>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-1">
             <div class="col-span-2 text-xs text-slate-400 font-semibold pt-1">🎬 Video</div>
-            <div>Bitrate:</div><div id="statsBitrate">-</div>
-            <div>FPS:</div><div id="statsFps">-</div>
-            <div>RTT:</div><div id="statsRtt">-</div>
-            <div>Packet Loss:</div><div id="statsLoss">-</div>
-            <div>Jitter:</div><div id="statsJitter">-</div>
+            <div class="text-slate-400">Bitrate:</div><div id="statsBitrate" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">FPS:</div><div id="statsFps" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">RTT:</div><div id="statsRtt" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">Packet Loss:</div><div id="statsLoss" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">Jitter:</div><div id="statsJitter" class="tabular-nums font-medium">-</div>
             <div class="col-span-2 text-xs text-slate-400 font-semibold pt-2 border-t border-slate-700 mt-1">🔊 Ses</div>
-            <div>Bitrate:</div><div id="statsAudioBitrate">-</div>
-            <div>Packet Loss:</div><div id="statsAudioLoss">-</div>
-            <div>Jitter:</div><div id="statsAudioJitter">-</div>
+            <div class="text-slate-400">Bitrate:</div><div id="statsAudioBitrate" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">Packet Loss:</div><div id="statsAudioLoss" class="tabular-nums font-medium">-</div>
+            <div class="text-slate-400">Jitter:</div><div id="statsAudioJitter" class="tabular-nums font-medium">-</div>
         </div>
     </div>
 
-    <!-- Main Layout -->
-    <div class="max-w-[1600px] mx-auto p-3 lg:p-4">
-        <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-4.5rem)] h-auto">
+    <!-- ==================== MAIN LAYOUT ==================== -->
+    <div class="max-w-[1700px] mx-auto p-2 sm:p-3 lg:p-4">
+        <div class="flex flex-col lg:flex-row gap-3 lg:gap-4 lg:h-[calc(100vh-3.75rem)] h-auto">
 
-            <!-- Left: Video + Viewer Controls -->
+            <!-- ===== LEFT: VIDEO + CONTROLS ===== -->
             <div class="flex-1 flex flex-col min-w-0">
-                <!-- Video -->
-                <div id="videoContainer" class="bg-black rounded-2xl overflow-hidden relative flex-shrink-0" style="aspect-ratio:16/9">
-                    <video id="remoteVideo" autoplay playsinline class="w-full h-full object-contain"></video>
-                    <video id="localVideo" autoplay playsinline muted class="hidden w-full h-full object-contain"></video>
+                <!-- Video Container -->
+                <div id="videoContainer" class="bg-black rounded-xl sm:rounded-2xl overflow-hidden relative flex-shrink-0 shadow-2xl ring-1 ring-slate-700/50" style="aspect-ratio:16/9">
+                    <video id="remoteVideo" autoplay playsinline class="w-full h-full object-contain bg-black"></video>
+                    <video id="localVideo" autoplay playsinline muted class="hidden w-full h-full object-contain bg-black"></video>
 
-                    <div id="pausedOverlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center hidden">
-                        <svg class="w-16 h-16 text-slate-500 mb-4" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                        </svg>
-                        <p class="text-slate-400 text-lg">Yayın duraklatıldı</p>
+                    <!-- Top gradient + info overlay -->
+                    <div class="absolute top-0 left-0 right-0 video-gradient-top pointer-events-none"></div>
+
+                    <!-- Paused Overlay -->
+                    <div id="pausedOverlay" class="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center hidden overlay-fade z-20">
+                        <div class="w-20 h-20 rounded-full bg-slate-700/50 flex items-center justify-center mb-4">
+                            <svg class="w-10 h-10 text-slate-400" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                        </div>
+                        <p class="text-slate-300 text-lg font-medium">Yayın duraklatıldı</p>
                     </div>
 
-                    <div id="waitingOverlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center">
-                        <div class="w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p class="text-slate-400">Yayın bekleniyor...</p>
+                    <!-- Waiting Overlay -->
+                    <div id="waitingOverlay" class="absolute inset-0 bg-gradient-to-br from-slate-900 to-black flex flex-col items-center justify-center overlay-fade z-20">
+                        <div class="relative mb-5">
+                            <div class="w-16 h-16 border-4 border-slate-700 rounded-full"></div>
+                            <div class="absolute inset-0 w-16 h-16 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                        <p class="text-slate-400 text-base">Yayın bekleniyor...</p>
+                        <p class="text-slate-600 text-xs mt-1.5">Yayıncı yayını başlattığında görüntü burada görünecek</p>
                     </div>
                 </div>
 
-                <!-- Viewer Controls Bar -->
-                <div id="viewerControls" class="mt-3 flex items-center gap-3 hidden flex-wrap">
-                    <button id="btnPlayPause" class="p-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors">
+                <!-- ===== VIEWER CONTROLS BAR ===== -->
+                <div id="viewerControls" class="mt-3 flex items-center gap-2 sm:gap-3 hidden flex-wrap bg-slate-800/50 backdrop-blur rounded-xl p-2 border border-slate-700/50">
+                    <button id="btnPlayPause" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn" title="Oynat/Durdur">
                         <svg id="iconPlay" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                         <svg id="iconPause" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                     </button>
-                    <div class="flex items-center gap-2">
-                        <button id="btnMute" class="p-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors">
+                    <div class="flex items-center gap-2 bg-slate-700/50 rounded-lg px-2 py-1.5">
+                        <button id="btnMute" class="hover:text-brand-400 transition-colors" title="Sesi Aç/Kapat">
                             <svg id="iconVolumeOn" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" /></svg>
                             <svg id="iconVolumeOff" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" /></svg>
                         </button>
-                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1" class="w-20">
+                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1" class="w-16 sm:w-20">
                     </div>
-                    <select id="qualitySelect" class="px-2 py-1.5 bg-slate-700 rounded-lg text-sm border border-slate-600">
-                        <option value="auto">Otomatik</option>
-                        <option value="high">Yüksek</option>
-                        <option value="mid">Orta</option>
-                        <option value="low">Düşük</option>
+                    <select id="qualitySelect" class="px-2.5 py-2 bg-slate-700/50 rounded-lg text-sm border border-slate-600/50 cursor-pointer hover:bg-slate-700 transition-colors">
+                        <option value="auto">⚡ Otomatik</option>
+                        <option value="high">🎯 Yüksek</option>
+                        <option value="mid">📊 Orta</option>
+                        <option value="low">📉 Düşük</option>
                     </select>
-                    <button id="btnFullscreen" class="p-2 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors ml-auto">
+                    <button id="btnFullscreen" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn ml-auto" title="Tam Ekran">
                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
                     </button>
                 </div>
+
+                <!-- Admin Stream Info (shown to admin when live) -->
+                <div id="adminStreamInfo" class="mt-3 hidden bg-emerald-600/10 border border-emerald-600/30 rounded-xl px-4 py-2.5 flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm text-emerald-400">
+                        <span class="w-2 h-2 bg-emerald-500 rounded-full live-dot"></span>
+                        <span class="font-medium">Yayında</span>
+                        <span id="adminTimer" class="text-emerald-300/70 tabular-nums text-xs">00:00</span>
+                    </div>
+                    <span class="text-xs text-slate-400">İzleyiciler seni izliyor</span>
+                </div>
             </div>
 
-            <!-- Right Sidebar -->
-            <div class="w-full lg:w-72 xl:w-80 flex-shrink-0 flex flex-col gap-3 lg:overflow-hidden sidebar-scroll pb-2">
+            <!-- ===== RIGHT SIDEBAR ===== -->
+            <div class="w-full lg:w-72 xl:w-80 flex-shrink-0 flex flex-col gap-3 lg:overflow-y-auto sidebar-scroll pb-2 lg:pr-1">
 
                 <!-- ===== ADMIN PANEL ===== -->
-                <div id="adminPanel" class="bg-slate-800 rounded-xl border border-slate-700 hidden lg:max-h-[40vh] lg:overflow-y-auto sidebar-scroll flex-shrink-0">
+                <div id="adminPanel" class="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700/50 hidden flex-shrink-0">
                     <div class="p-4">
                         <h3 class="font-semibold mb-3 flex items-center gap-2 text-sm">
-                            <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20">
+                            <svg class="w-4 h-4 text-brand-400" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
                             </svg>
                             Yayın Kontrolleri
                         </h3>
 
-                        <!-- Stream Settings -->
-                        <div class="space-y-2 mb-3">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="text-xs text-slate-400">Çözünürlük</label>
-                                    <select id="resSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700 rounded-lg text-xs">
-                                        <option value="1080">1080p</option>
-                                        <option value="720" selected>720p</option>
-                                        <option value="480">480p</option>
-                                        <option value="360">360p</option>
-                                        <option value="240">240p</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs text-slate-400">FPS</label>
-                                    <select id="fpsSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700 rounded-lg text-xs">
-                                        <option value="60">60 FPS</option>
-                                        <option value="30" selected>30 FPS</option>
-                                        <option value="24">24 FPS</option>
-                                        <option value="15">15 FPS</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="text-xs text-slate-400">Max Bitrate (Kbps)</label>
-                                <input id="bitrateInput" type="number" value="5000" step="500" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700 rounded-lg text-xs">
+                        <!-- Quality Presets -->
+                        <div class="mb-3">
+                            <label class="text-xs text-slate-400 mb-1.5 block">Hazır Kalite Ayarları</label>
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <button data-preset="low" class="preset-btn px-1 py-1.5 bg-slate-700/50 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-xs transition-all ctrl-btn">Düşük</button>
+                                <button data-preset="medium" class="preset-btn px-1 py-1.5 bg-slate-700/50 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-xs transition-all ctrl-btn">Orta</button>
+                                <button data-preset="high" class="preset-btn px-1 py-1.5 bg-slate-700/50 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-xs transition-all ctrl-btn preset-active">Yüksek</button>
+                                <button data-preset="ultra" class="preset-btn px-1 py-1.5 bg-slate-700/50 hover:bg-slate-600 border border-slate-600/50 rounded-lg text-xs transition-all ctrl-btn">Ultra</button>
                             </div>
                         </div>
 
+                        <!-- Advanced Settings (collapsible) -->
+                        <details class="mb-3 group">
+                            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-300 transition-colors flex items-center gap-1 select-none">
+                                <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                Gelişmiş Ayarlar
+                            </summary>
+                            <div class="space-y-2 mt-2">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-xs text-slate-400">Çözünürlük</label>
+                                        <select id="resSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                            <option value="1080">1080p</option>
+                                            <option value="720" selected>720p</option>
+                                            <option value="480">480p</option>
+                                            <option value="360">360p</option>
+                                            <option value="240">240p</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-slate-400">FPS</label>
+                                        <select id="fpsSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                            <option value="60">60 FPS</option>
+                                            <option value="30" selected>30 FPS</option>
+                                            <option value="24">24 FPS</option>
+                                            <option value="15">15 FPS</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-slate-400">Max Bitrate (Kbps)</label>
+                                    <input id="bitrateInput" type="number" value="5000" step="500" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                </div>
+                            </div>
+                        </details>
+
                         <!-- Stream Buttons -->
                         <div class="space-y-2 mb-3">
-                            <button id="btnStartStream" class="w-full py-2 bg-green-600 hover:bg-green-500 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2">
+                            <button id="btnStartStream" class="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 rounded-lg font-semibold text-sm transition-all ctrl-btn flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
                                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                                 Yayın Başlat
                             </button>
-                            <button id="btnStopStream" class="w-full py-2 bg-red-600 hover:bg-red-500 rounded-lg font-semibold text-sm transition-colors hidden flex items-center justify-center gap-2">
-                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                            <button id="btnStopStream" class="w-full py-2.5 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 rounded-lg font-semibold text-sm transition-all ctrl-btn hidden items-center justify-center gap-2 shadow-lg shadow-red-600/20">
+                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
                                 Yayını Durdur
                             </button>
                         </div>
 
-                        <!-- Admin Own Mic & System Audio -->
-                        <div class="space-y-1.5 pb-3 mb-3 border-b border-slate-700">
-                            <button id="btnToggleMic" class="w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors">
-                                🎤 Kendi Mikrofonum (Kapalı)
+                        <!-- Mic & System Audio -->
+                        <div class="space-y-1.5 pb-3 mb-3 border-b border-slate-700/50">
+                            <button id="btnToggleMic" class="w-full py-2 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z"/><path d="M17 11a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg>
+                                <span>Mikrofonum (Kapalı)</span>
                             </button>
-                            <button id="btnToggleAudio" class="w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors">
-                                🔊 Sistem Sesi (Kapalı)
+                            <button id="btnToggleAudio" class="w-full py-2 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                                <span>Sistem Sesi (Kapalı)</span>
                             </button>
                         </div>
 
-                        <!-- Room Controls (admin-only toggles) -->
-                        <div class="space-y-1.5 pb-3 mb-3 border-b border-slate-700">
+                        <!-- Room Controls -->
+                        <div class="space-y-1.5 pb-3 mb-3 border-b border-slate-700/50">
                             <p class="text-xs text-slate-400 mb-1">Oda Ayarları</p>
-                            <button id="btnToggleViewerMic" class="w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium">
+                            <button id="btnToggleViewerMic" class="w-full py-2 bg-emerald-700/30 hover:bg-emerald-700/40 border border-emerald-700/30 rounded-lg text-xs transition-all ctrl-btn font-medium">
                                 🎙️ İzleyici Mikrofonu: Açık
                             </button>
-                            <button id="btnToggleChat" class="w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium">
+                            <button id="btnToggleChat" class="w-full py-2 bg-emerald-700/30 hover:bg-emerald-700/40 border border-emerald-700/30 rounded-lg text-xs transition-all ctrl-btn font-medium">
                                 💬 Chat: Açık
                             </button>
                         </div>
 
                         <!-- Max Users -->
-                        <div class="pb-3 mb-3 border-b border-slate-700">
+                        <div class="pb-3 mb-3 border-b border-slate-700/50">
                             <label class="text-xs text-slate-400">Max Kullanıcı</label>
                             <div class="flex gap-2 mt-0.5">
-                                <input id="maxUsersInput" type="number" value="8" min="2" max="1000" class="flex-1 px-2 py-1.5 bg-slate-700 rounded-lg text-xs">
-                                <button id="btnUpdateMaxUsers" class="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 rounded-lg text-xs transition-colors">Güncelle</button>
+                                <input id="maxUsersInput" type="number" value="8" min="2" max="1000" class="flex-1 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                <button id="btnUpdateMaxUsers" class="px-3 py-1.5 bg-slate-600/50 hover:bg-slate-500 rounded-lg text-xs transition-colors">Güncelle</button>
                             </div>
                         </div>
 
-                        <!-- Close Room -->
-                        <button id="btnCloseRoom" class="w-full py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg text-xs transition-colors">
+                        <button id="btnCloseRoom" class="w-full py-2 bg-red-600/15 hover:bg-red-600/25 border border-red-600/20 text-red-400 rounded-lg text-xs transition-all ctrl-btn">
                             🚪 Odayı Kapat
                         </button>
                     </div>
                 </div>
 
                 <!-- ===== VIEWER PANEL ===== -->
-                <div id="viewerInfo" class="bg-slate-800 rounded-xl border border-slate-700 p-4 hidden">
-                    <p class="text-slate-400 text-xs text-center mb-3">Odadasınız</p>
+                <div id="viewerInfo" class="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700/50 p-4 hidden">
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-2 h-2 bg-emerald-500 rounded-full live-dot"></div>
+                        <p class="text-slate-300 text-xs font-medium">Odadasınız</p>
+                    </div>
                     <div class="space-y-2">
-                        <button id="btnViewerMic" class="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-colors font-medium">
-                            🎤 Mikrofon Aç
+                        <button id="btnViewerMic" class="w-full py-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-sm transition-all ctrl-btn font-medium flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z"/><path d="M17 11a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg>
+                            <span>Mikrofon Aç</span>
                         </button>
-                        <button id="btnLeaveRoom" class="w-full py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg text-xs transition-colors">
+                        <button id="btnLeaveRoom" class="w-full py-2 bg-red-600/15 hover:bg-red-600/25 border border-red-600/20 text-red-400 rounded-lg text-xs transition-all ctrl-btn">
                             🚪 Odadan Çık
                         </button>
                     </div>
                 </div>
 
                 <!-- ===== USER LIST ===== -->
-                <div class="bg-slate-800 rounded-xl border border-slate-700 flex flex-col flex-shrink-0 max-h-[280px] lg:max-h-[25vh]">
-                    <div class="flex items-center justify-between px-3 py-2.5 border-b border-slate-700 flex-shrink-0">
-                        <h3 class="text-sm font-semibold">Kullanıcılar</h3>
-                        <span id="userCountBadge" class="text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full">0</span>
+                <div class="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700/50 flex flex-col flex-shrink-0 max-h-[260px] lg:max-h-[22vh]">
+                    <div class="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/50 flex-shrink-0">
+                        <h3 class="text-sm font-semibold flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+                            Kullanıcılar
+                        </h3>
+                        <span id="userCountBadge" class="text-xs text-slate-400 bg-slate-700/50 px-2 py-0.5 rounded-full tabular-nums">0</span>
                     </div>
                     <div id="userListContainer" class="overflow-y-auto p-2 space-y-1 flex-1 sidebar-scroll"></div>
                 </div>
 
                 <!-- ===== CHAT ===== -->
-                <div class="bg-slate-800 rounded-xl border border-slate-700 flex flex-col flex-1 h-[400px] lg:h-auto lg:min-h-[250px]">
-                    <div class="flex items-center justify-between px-3 py-2.5 border-b border-slate-700 flex-shrink-0">
-                        <h3 class="text-sm font-semibold">💬 Chat</h3>
-                        <span id="chatStatusBadge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-700/40 text-emerald-400">Açık</span>
+                <div class="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700/50 flex flex-col flex-1 h-[320px] lg:h-auto lg:min-h-[220px]">
+                    <div class="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/50 flex-shrink-0">
+                        <h3 class="text-sm font-semibold flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            Chat
+                        </h3>
+                        <span id="chatStatusBadge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-700/30 text-emerald-400">Açık</span>
                     </div>
 
-                    <!-- Messages -->
                     <div id="chatMessages" class="flex-1 overflow-y-auto p-2 space-y-1.5 sidebar-scroll text-sm"></div>
 
-                    <!-- Input -->
-                    <div class="p-2 border-t border-slate-700 flex-shrink-0">
+                    <div class="p-2 border-t border-slate-700/50 flex-shrink-0">
                         <div id="chatInputArea" class="flex gap-2">
                             <input id="chatInput" type="text" placeholder="Mesajınız..." maxlength="500"
-                                class="flex-1 px-3 py-1.5 bg-slate-700 rounded-lg text-sm border border-slate-600 focus:border-brand-500 focus:outline-none">
-                            <button id="btnSendChat" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm transition-colors font-medium">
-                                Gönder
+                                class="flex-1 px-3 py-1.5 bg-slate-700/50 rounded-lg text-sm border border-slate-600/30 focus:border-brand-500 focus:outline-none transition-colors">
+                            <button id="btnSendChat" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm transition-all ctrl-btn font-medium">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
                             </button>
                         </div>
-                        <div id="chatDisabledMsg" class="hidden text-center text-xs text-slate-500 py-1">
+                        <div id="chatDisabledMsg" class="hidden text-center text-xs text-slate-500 py-1.5">
                             Chat oda sahibi tarafından kapatıldı
                         </div>
                     </div>
@@ -284,49 +391,59 @@
         </div><!-- /flex -->
     </div><!-- /main -->
 
-    <!-- ===== NICKNAME MODAL ===== -->
-    <div id="nicknameModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center z-50">
-        <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-sm mx-4 border border-slate-700 shadow-2xl">
-            <h3 class="text-xl font-bold mb-1">Merhaba! 👋</h3>
-            <p class="text-slate-400 text-sm mb-5">Odaya girmeden önce bir nickname seç.</p>
+    <!-- ==================== NICKNAME MODAL ==================== -->
+    <div id="nicknameModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+        <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-sm mx-4 border border-slate-700/50 shadow-2xl">
+            <div class="text-center mb-5">
+                <div class="w-14 h-14 mx-auto rounded-full bg-gradient-to-br from-brand-500 to-purple-500 flex items-center justify-center mb-3">
+                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                </div>
+                <h3 class="text-xl font-bold">Hoş geldin!</h3>
+                <p class="text-slate-400 text-sm mt-1">Odaya girmeden önce bir nickname seç.</p>
+            </div>
             <input id="nicknameInput" type="text" placeholder="Nickname (3-30 karakter)" maxlength="30"
-                class="w-full px-4 py-2.5 bg-slate-700 rounded-lg border border-slate-600 focus:border-brand-500 focus:outline-none mb-2">
+                class="w-full px-4 py-2.5 bg-slate-700/50 rounded-lg border border-slate-600/50 focus:border-brand-500 focus:outline-none mb-2 transition-colors">
             <p id="nicknameError" class="text-red-400 text-xs mb-3 hidden"></p>
-            <button id="btnConfirmNickname" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-500 font-semibold transition-colors">
+            <button id="btnConfirmNickname" class="w-full py-2.5 rounded-lg bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 font-semibold transition-all ctrl-btn">
                 Odaya Gir
             </button>
         </div>
     </div>
 
-    <!-- ===== PASSWORD MODAL ===== -->
-    <div id="passwordModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
-        <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 border border-slate-700">
-            <h3 class="text-xl font-bold mb-2">Şifre Gerekli 🔒</h3>
+    <!-- ==================== PASSWORD MODAL ==================== -->
+    <div id="passwordModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+        <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-md mx-4 border border-slate-700/50 shadow-2xl">
+            <div class="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center mb-4">
+                <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            </div>
+            <h3 class="text-xl font-bold mb-1">Şifre Gerekli</h3>
             <p class="text-slate-400 text-sm mb-4">Bu oda şifre ile korunuyor</p>
-            <input id="passwordInput" type="password" placeholder="Oda şifresi"
-                class="w-full px-4 py-2 bg-slate-700 rounded-lg border border-slate-600 focus:border-brand-500 focus:outline-none mb-2">
+            <input id="passwordInput" type="password" placeholder="Oda şifresi" class="w-full px-4 py-2.5 bg-slate-700/50 rounded-lg border border-slate-600/50 focus:border-brand-500 focus:outline-none mb-2 transition-colors">
             <p id="passwordModalError" class="text-red-400 text-sm hidden mb-2"></p>
             <div class="flex gap-3 mt-4">
-                <button id="btnCancelPassword" class="flex-1 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition-colors">Geri</button>
-                <button id="btnSubmitPassword" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 font-semibold transition-colors">Katıl</button>
+                <button id="btnCancelPassword" class="flex-1 py-2.5 rounded-lg border border-slate-600/50 hover:bg-slate-700/50 transition-colors">Geri</button>
+                <button id="btnSubmitPassword" class="flex-1 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-500 font-semibold transition-all ctrl-btn">Katıl</button>
             </div>
         </div>
     </div>
 
-    <!-- ===== LEAVE CONFIRM MODAL ===== -->
-    <div id="leaveModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
-        <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-md mx-4 border border-slate-700">
+    <!-- ==================== LEAVE MODAL ==================== -->
+    <div id="leaveModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+        <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-md mx-4 border border-slate-700/50 shadow-2xl">
+            <div class="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
+                <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            </div>
             <h3 class="text-xl font-bold mb-2">Odadan Çık</h3>
-            <p class="text-slate-400 mb-6">Odadan çıkmak istiyor musunuz?</p>
+            <p class="text-slate-400 mb-6">Odadan çıkmak istediğinize emin misiniz?</p>
             <div class="flex gap-3">
-                <button id="btnCancelLeave" class="flex-1 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition-colors">Hayır</button>
-                <button id="btnConfirmLeave" class="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-500 font-semibold transition-colors">Evet</button>
+                <button id="btnCancelLeave" class="flex-1 py-2.5 rounded-lg border border-slate-600/50 hover:bg-slate-700/50 transition-colors">Hayır</button>
+                <button id="btnConfirmLeave" class="flex-1 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 font-semibold transition-all ctrl-btn">Evet, Çık</button>
             </div>
         </div>
     </div>
 
-    <!-- Toast -->
-    <div id="toast" class="fixed bottom-4 right-4 max-w-xs bg-slate-800 border border-slate-700 text-white px-5 py-3 rounded-lg shadow-lg hidden z-50">
+    <!-- ==================== TOAST ==================== -->
+    <div id="toast" class="fixed bottom-4 right-4 max-w-xs bg-slate-800 border border-slate-700/50 text-white px-5 py-3 rounded-xl shadow-2xl hidden z-50 backdrop-blur">
         <p id="toastMessage"></p>
     </div>
 

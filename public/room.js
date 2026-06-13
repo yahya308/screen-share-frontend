@@ -51,6 +51,10 @@ let currentQuality   = 'auto';
 let videoConsumer    = null;
 const iceRestartState = new WeakMap();
 
+// Stream timer
+let streamTimerInterval = null;
+let streamStartTime    = null;
+
 // Stats
 let statsInterval  = null;
 let lastStats      = { timestamp: 0, bytes: 0 };
@@ -139,6 +143,16 @@ const userCountBadge    = document.getElementById('userCountBadge');
 // Toast
 const toast        = document.getElementById('toast');
 const toastMessage = document.getElementById('toastMessage');
+
+// UI: Stream status badge, timer, connection quality, presets
+const streamStatusBadge = document.getElementById('streamStatusBadge');
+const streamTimerEl     = document.getElementById('streamTimer');
+const adminStreamInfo   = document.getElementById('adminStreamInfo');
+const adminTimerEl      = document.getElementById('adminTimer');
+const connQuality       = document.getElementById('connQuality');
+const connDot           = document.getElementById('connDot');
+const connText          = document.getElementById('connText');
+const presetButtons     = document.querySelectorAll('.preset-btn');
 
 // ==================== NICKNAME MODAL ====================
 
@@ -496,10 +510,14 @@ function renderUserList(users) {
             </div>
             ${isAdmin && !isOwner && !isMe ? `
                 <div class="flex gap-1 flex-shrink-0">
-                    <button onclick="kickUser('${escapeHtml(user.socketId)}')" title="Kick"
-                        class="p-1 text-orange-400 hover:bg-orange-500/20 rounded transition-colors text-xs">✱</button>
-                    <button onclick="banUser('${escapeHtml(user.socketId)}')" title="Ban"
-                        class="p-1 text-red-400 hover:bg-red-500/20 rounded transition-colors text-xs">🚫</button>
+                    <button onclick="kickUser('${escapeHtml(user.socketId)}')" title="Odadan At"
+                        class="p-1.5 text-orange-400 hover:bg-orange-500/20 rounded-lg transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                        </button>
+                    <button onclick="banUser('${escapeHtml(user.socketId)}')" title="Banla"
+                        class="p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                        </button>
                 </div>
             ` : ''}
         `;
@@ -862,6 +880,58 @@ function syncAllAudioElements() {
 
 // ==================== ADMIN: STREAM CONTROLS ====================
 
+/**
+ * Stream timer ve LIVE badge yönetimi
+ */
+function startStreamTimer() {
+    streamStartTime = Date.now();
+    const update = () => {
+        const elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
+        const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const ss = String(elapsed % 60).padStart(2, '0');
+        if (streamTimerEl) streamTimerEl.textContent = `${mm}:${ss}`;
+        if (adminTimerEl) adminTimerEl.textContent = `${mm}:${ss}`;
+    };
+    update();
+    streamTimerInterval = setInterval(update, 1000);
+    // LIVE badge göster
+    if (streamStatusBadge) { streamStatusBadge.classList.remove('hidden'); streamStatusBadge.classList.add('flex'); }
+    if (adminStreamInfo) { adminStreamInfo.classList.remove('hidden'); adminStreamInfo.classList.add('flex'); }
+}
+
+function stopStreamTimer() {
+    if (streamTimerInterval) { clearInterval(streamTimerInterval); streamTimerInterval = null; }
+    streamStartTime = null;
+    if (streamStatusBadge) { streamStatusBadge.classList.add('hidden'); streamStatusBadge.classList.remove('flex'); }
+    if (adminStreamInfo) { adminStreamInfo.classList.add('hidden'); adminStreamInfo.classList.remove('flex'); }
+}
+
+/**
+ * Kalite preset'leri — çözünürlük + FPS + bitrate'i birlikte ayarlar
+ */
+const QUALITY_PRESETS = {
+    low:    { res: '480',  fps: '24', bitrate: '1500',  label: 'Düşük' },
+    medium: { res: '720',  fps: '30', bitrate: '3500',  label: 'Orta' },
+    high:   { res: '720',  fps: '30', bitrate: '5000',  label: 'Yüksek' },
+    ultra:  { res: '1080', fps: '60', bitrate: '10000', label: 'Ultra' }
+};
+
+function applyPreset(preset) {
+    const p = QUALITY_PRESETS[preset];
+    if (!p) return;
+    if (resSelect) resSelect.value = p.res;
+    if (fpsSelect) fpsSelect.value = p.fps;
+    if (bitrateInput) bitrateInput.value = p.bitrate;
+    // Aktif preset görselini güncelle
+    presetButtons.forEach(btn => {
+        btn.classList.toggle('preset-active', btn.dataset.preset === preset);
+    });
+}
+
+presetButtons.forEach(btn => {
+    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+});
+
 btnStartStream.addEventListener('click', async () => {
     if (!producerTransport) {
         await initMediasoup();
@@ -929,7 +999,7 @@ async function startStream() {
             showToast('Yayın başlandı', 'success');
             startStatsLoop(true);
             statsStarted = true;
-
+            startStreamTimer();
             // B1 DÜZELTMESİ: Yayın başlamadan önce açılmış mikrofon varsa, artık
             // producerTransport hazır → producer'ı oluştur ki ses izleyicilere gitsin.
             // (startStream başında micProducer=null yapılmıştı, micTrack hâlâ canlı.)
@@ -960,6 +1030,7 @@ function stopStream() {
     btnStopStream.classList.add('hidden');
     updateAdminMicButton(false);
     updateAdminAudioButton(false);
+    stopStreamTimer();
     showToast('Yayın durduruldu');
 }
 
@@ -1034,15 +1105,16 @@ btnToggleMic.addEventListener('click', async () => {
     }
 });
 
-/** Admin mikrofon butonu için net görsel state (U2) */
+/** Admin mikrofon butonu için net görsel state (U2) — SVG+span yapısına uygun */
 function updateAdminMicButton(on) {
     if (!btnToggleMic) return;
+    const span = btnToggleMic.querySelector('span');
     if (on) {
-        btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Açık)';
-        btnToggleMic.className = 'w-full py-1.5 bg-red-600/60 hover:bg-red-600 rounded-lg text-xs transition-colors font-medium';
+        if (span) span.textContent = 'Mikrofonum (Açık)';
+        btnToggleMic.className = 'w-full py-2 bg-red-600/60 hover:bg-red-600 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5 font-medium';
     } else {
-        btnToggleMic.textContent = '🎤 Kendi Mikrofonum (Kapalı)';
-        btnToggleMic.className = 'w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors';
+        if (span) span.textContent = 'Mikrofonum (Kapalı)';
+        btnToggleMic.className = 'w-full py-2 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5';
     }
 }
 
@@ -1065,15 +1137,16 @@ async function republishSystemAudio() {
     }
 }
 
-/** Admin sistem sesi butonu için net görsel state (U2) */
+/** Admin sistem sesi butonu için net görsel state (U2) — SVG+span yapısına uygun */
 function updateAdminAudioButton(on) {
     if (!btnToggleAudio) return;
+    const span = btnToggleAudio.querySelector('span');
     if (on) {
-        btnToggleAudio.textContent = '🔊 Sistem Sesi (Açık)';
-        btnToggleAudio.className = 'w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium';
+        if (span) span.textContent = 'Sistem Sesi (Açık)';
+        btnToggleAudio.className = 'w-full py-2 bg-emerald-700/40 hover:bg-emerald-700/50 border border-emerald-700/30 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5 font-medium';
     } else {
-        btnToggleAudio.textContent = '🔊 Sistem Sesi (Kapalı)';
-        btnToggleAudio.className = 'w-full py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors';
+        if (span) span.textContent = 'Sistem Sesi (Kapalı)';
+        btnToggleAudio.className = 'w-full py-2 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-xs transition-all ctrl-btn flex items-center justify-center gap-1.5';
     }
 }
 
@@ -1129,10 +1202,10 @@ function updateViewerMicToggle() {
     if (!btnToggleViewerMic) return;
     if (viewerMicEnabled) {
         btnToggleViewerMic.textContent = '🎙️ İzleyici Mikrofonu: Açık';
-        btnToggleViewerMic.className = 'w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium';
+        btnToggleViewerMic.className = 'w-full py-2 bg-emerald-700/30 hover:bg-emerald-700/40 border border-emerald-700/30 rounded-lg text-xs transition-all ctrl-btn font-medium';
     } else {
         btnToggleViewerMic.textContent = '🎙️ İzleyici Mikrofonu: Kapalı';
-        btnToggleViewerMic.className = 'w-full py-1.5 bg-red-700/40 hover:bg-red-700/60 rounded-lg text-xs transition-colors font-medium text-red-300';
+        btnToggleViewerMic.className = 'w-full py-2 bg-red-700/20 hover:bg-red-700/30 border border-red-700/20 rounded-lg text-xs transition-all ctrl-btn font-medium text-red-400';
     }
     adminViewerMicEnabled = viewerMicEnabled;
 }
@@ -1150,10 +1223,10 @@ function updateChatToggle() {
     if (!btnToggleChat) return;
     if (chatEnabled) {
         btnToggleChat.textContent = '💬 Chat: Açık';
-        btnToggleChat.className = 'w-full py-1.5 bg-emerald-700/60 hover:bg-emerald-700 rounded-lg text-xs transition-colors font-medium';
+        btnToggleChat.className = 'w-full py-2 bg-emerald-700/30 hover:bg-emerald-700/40 border border-emerald-700/30 rounded-lg text-xs transition-all ctrl-btn font-medium';
     } else {
         btnToggleChat.textContent = '💬 Chat: Kapalı';
-        btnToggleChat.className = 'w-full py-1.5 bg-red-700/40 hover:bg-red-700/60 rounded-lg text-xs transition-colors font-medium text-red-300';
+        btnToggleChat.className = 'w-full py-2 bg-red-700/20 hover:bg-red-700/30 border border-red-700/20 rounded-lg text-xs transition-all ctrl-btn font-medium text-red-400';
     }
     adminChatEnabled = chatEnabled;
 }
@@ -1249,18 +1322,19 @@ function closeViewerMic() {
 
 function updateViewerMicButton(open) {
     if (!btnViewerMic) return;
+    const span = btnViewerMic.querySelector('span');
     if (!viewerMicEnabled) {
-        btnViewerMic.textContent = '🎤 Mikrofon (Devre Dışı)';
+        if (span) span.textContent = 'Mikrofon (Devre Dışı)';
         btnViewerMic.disabled = true;
-        btnViewerMic.className = 'w-full py-2 bg-slate-600/50 text-slate-500 rounded-lg text-sm cursor-not-allowed';
+        btnViewerMic.className = 'w-full py-2.5 bg-slate-600/30 text-slate-500 rounded-lg text-sm cursor-not-allowed flex items-center justify-center gap-2';
     } else if (open) {
-        btnViewerMic.textContent = '🎤 Mikrofon Kapat';
+        if (span) span.textContent = 'Mikrofonu Kapat';
         btnViewerMic.disabled = false;
-        btnViewerMic.className = 'w-full py-2 bg-red-600/60 hover:bg-red-600 rounded-lg text-sm transition-colors font-medium';
+        btnViewerMic.className = 'w-full py-2.5 bg-red-600/60 hover:bg-red-600 rounded-lg text-sm transition-all ctrl-btn font-medium flex items-center justify-center gap-2';
     } else {
-        btnViewerMic.textContent = '🎤 Mikrofon Aç';
+        if (span) span.textContent = 'Mikrofon Aç';
         btnViewerMic.disabled = false;
-        btnViewerMic.className = 'w-full py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-colors font-medium';
+        btnViewerMic.className = 'w-full py-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg text-sm transition-all ctrl-btn font-medium flex items-center justify-center gap-2';
     }
 }
 
@@ -1504,9 +1578,25 @@ function startStatsLoop(isSender) {
             if (aLoss) aLoss.textContent = audioPacketsTotal ? `${Math.round((audioPacketsLost / audioPacketsTotal) * 100)}%` : '0%';
             if (aJitter) aJitter.textContent = audioJitter ? `${Math.round(audioJitter * 1000)} ms` : '-';
 
-            // U7: Düşük kalite uyarısı — yüksek paket kaybı tespit edilirse kullanıcı bilgilendir
+            // U7: Düşük kalite uyarısı — videoLossPct burada tanımlanıyor
             const videoLossPct = packetsTotal ? (packetsLost / packetsTotal) * 100 : 0;
             const now2 = Date.now();
+
+            // Bağlantı kalitesi göstergesi (header)
+            if (connDot && connText) {
+                const rttMs = rtt ? Math.round(rtt * 1000) : 0;
+                if (videoLossPct > 5 || rttMs > 300) {
+                    connDot.className = "w-2 h-2 rounded-full conn-poor";
+                    connText.textContent = "Zayıf";
+                } else if (videoLossPct > 2 || rttMs > 150) {
+                    connDot.className = "w-2 h-2 rounded-full conn-good";
+                    connText.textContent = "Orta";
+                } else {
+                    connDot.className = "w-2 h-2 rounded-full conn-excellent";
+                    connText.textContent = "İyi";
+                }
+            }
+
             if (videoLossPct > 8 && (!showToast._lastLowQualityWarn || now2 - showToast._lastLowQualityWarn > 15000)) {
                 showToast._lastLowQualityWarn = now2;
                 showToast('Bağlantı zayıf görünüyor, görüntü kalitesi düşebilir', 'warning');
