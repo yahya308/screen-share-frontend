@@ -607,20 +607,28 @@ async function initMediasoup() {
 }
 
 function createSendTransport() {
-    socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
-        if (params.error) { console.error(params.error); return; }
+    return createSendTransportAsync();
+}
 
-        producerTransport = device.createSendTransport(params);
-        attachTransportHandlers(producerTransport);
+function createSendTransportAsync() {
+    return new Promise((resolve, reject) => {
+        socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
+            if (params.error) { console.error(params.error); reject(new Error(params.error)); return; }
 
-        producerTransport.on('connect', ({ dtlsParameters }, cb) => {
-            socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters });
-            cb();
-        });
+            producerTransport = device.createSendTransport(params);
+            attachTransportHandlers(producerTransport);
 
-        producerTransport.on('produce', ({ kind, rtpParameters, appData }, cb) => {
-            socket.emit('transport-produce', { transportId: producerTransport.id, kind, rtpParameters, appData },
-                ({ id, error }) => { if (error) console.error(error); cb({ id }); });
+            producerTransport.on('connect', ({ dtlsParameters }, cb) => {
+                socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters });
+                cb();
+            });
+
+            producerTransport.on('produce', ({ kind, rtpParameters, appData }, cb) => {
+                socket.emit('transport-produce', { transportId: producerTransport.id, kind, rtpParameters, appData },
+                    ({ id, error }) => { if (error) console.error(error); cb({ id }); });
+            });
+
+            resolve(producerTransport);
         });
     });
 }
@@ -929,20 +937,25 @@ presetButtons.forEach(btn => {
 });
 
 btnStartStream.addEventListener('click', async () => {
-    if (!producerTransport) {
-        await initMediasoup();
-        setTimeout(startStream, 500);
-    } else {
-        startStream();
-    }
+    if (!device) await initMediasoup();
+    startStream();
 });
 
 async function startStream() {
     // Close existing producers
     [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
-        if (p) { socket.emit('producer-closing', { producerId: p.id }); p.close(); }
+        if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
     videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
+
+    // KESİN ÇÖZÜM: RTP Extension / SDP collision hatasını önlemek için Send Transport'u
+    // tamamen kapatıp yepyeni, pırıl pırıl bir RTCPeerConnection ile taze başlatalım!
+    if (producerTransport) {
+        try { producerTransport.close(); } catch (e) { /* yoksay */ }
+        producerTransport = null;
+    }
+
+    await createSendTransportAsync();
 
     const height  = parseInt(resSelect.value);
     const fps     = parseInt(fpsSelect.value);
@@ -1014,6 +1027,11 @@ function stopStream() {
     });
     videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
 
+    if (producerTransport) {
+        try { producerTransport.close(); } catch (e) { /* yoksay */ }
+        producerTransport = null;
+    }
+
     if (systemAudioTrack) { systemAudioTrack.stop(); systemAudioTrack = null; }
     if (micTrack) { micTrack.stop(); micTrack = null; }
 
@@ -1040,16 +1058,8 @@ async function republishAdminMic() {
     // Mikrofon track'i yoksa veya producer zaten varsa bir şey yapma
     if (!micTrack || micProducer) return;
 
-    // Transport hazır olmayabilir (startStream → initMediasoup yarışı).
-    // Birkaç kez bekle ve tekrar dene.
-    const wait = (ms) => new Promise(r => setTimeout(r, ms));
-    for (let attempt = 0; attempt < 10; attempt++) {
-        if (producerTransport && !producerTransport.closed && device) break;
-        await wait(200);
-    }
     if (!producerTransport || producerTransport.closed) {
-        console.warn('⚠️ republishAdminMic: producerTransport hazır olmadı, mikrofon beklemeye alındı');
-        return;
+        await createSendTransportAsync();
     }
     try {
         micProducer = await producerTransport.produce({
@@ -1120,7 +1130,9 @@ function updateAdminMicButton(on) {
  */
 async function republishSystemAudio() {
     if (!systemAudioTrack || systemAudioProducer) return;
-    if (!producerTransport || producerTransport.closed) return;
+    if (!producerTransport || producerTransport.closed) {
+        await createSendTransportAsync();
+    }
     try {
         systemAudioProducer = await producerTransport.produce({
             track: systemAudioTrack,
@@ -1310,6 +1322,10 @@ function closeViewerMic() {
         socket.emit('producer-closing', { producerId: viewerMicProducer.id });
         try { viewerMicProducer.close(); } catch (e) { /* yoksay */ }
         viewerMicProducer = null;
+    }
+    if (viewerSendTransport) {
+        try { viewerSendTransport.close(); } catch (e) { /* yoksay */ }
+        viewerSendTransport = null;
     }
     if (viewerMicTrack) { viewerMicTrack.stop(); viewerMicTrack = null; }
     socket.emit('voice-activity', { speaking: false });
