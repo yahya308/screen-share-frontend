@@ -2,19 +2,13 @@
   "name": "velostream",
   "version": "2.0.0",
   "description": "VELOSTREAM - High-Performance Screen Sharing Platform (WebRTC + Mediasoup SFU)",
-  "main": "backend/server.js",
+  "private": true,
   "scripts": {
     "start": "cd backend && node server.js",
     "dev": "cd backend && nodemon server.js",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
-    "vercel-build": "echo 'Build completed'",
-    "render-start": "cd backend && node server.js"
-  },
-  "dependencies": {
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "vercel-build": "echo 'Static frontend — no build needed'"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

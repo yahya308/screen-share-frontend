@@ -340,7 +340,7 @@ io.on('connection', (socket) => {
             for (const [producerId, producer] of roomState.producers) {
                 const ownerData = roomManager.socketRooms.get(producer.appData?.socketId);
                 if (ownerData?.role === 'viewer' && producer.kind === 'audio') {
-                    try { producer.close(); } catch (e) {}
+                    try { producer.close(); } catch (e) { /* yoksay */ }
                     roomState.producers.delete(producerId);
                     closedIds.push(producerId);
                     workerManager.decrementProducers(roomState.workerIndex);
@@ -547,14 +547,14 @@ io.on('connection', (socket) => {
         if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback([]); return; }
-        
+
         const ids = [];
         for (const [id, producer] of socketData.roomState.producers) {
             if (producer.appData?.socketId !== socket.id) {
                 ids.push(id);
             }
         }
-        
+
         console.log(`📡 Sending ${ids.length} producers to ${socket.id}`);
         callback(ids);
     });
@@ -628,7 +628,7 @@ io.on('connection', (socket) => {
             try {
                 await consumerData.consumer.resume();
                 if (consumerData.consumer.kind === 'video') {
-                    try { await consumerData.consumer.requestKeyFrame(); } catch (e) {}
+                    try { await consumerData.consumer.requestKeyFrame(); } catch (e) { /* yoksay */ }
                 }
             } catch (error) {
                 console.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
@@ -686,7 +686,7 @@ io.on('connection', (socket) => {
         if (!socketData?.roomState) return;
         const consumerData = socketData.roomState.consumers.get(consumerId);
         if (consumerData?.consumer) {
-            try { await consumerData.consumer.requestKeyFrame(); } catch (e) {}
+            try { await consumerData.consumer.requestKeyFrame(); } catch (e) { /* yoksay */ }
         }
     });
 
@@ -700,7 +700,7 @@ io.on('connection', (socket) => {
                 roomManager.setStreamingStatus(socketData.roomId, false);
                 socket.to(socketData.roomId).emit('stream-paused');
             }
-            try { producer.close(); } catch (e) {}
+            try { producer.close(); } catch (e) { /* yoksay */ }
             socketData.roomState.producers.delete(producerId);
             workerManager.decrementProducers(socketData.roomState.workerIndex);
             socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: producerId });
@@ -739,7 +739,8 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
     const scores = Array.isArray(score) ? score.map(s => s?.score).filter(s => typeof s === 'number') : [];
     const overallScore = scores.length ? Math.min(...scores) : 10;
 
-    let { spatialLayer, temporalLayer, maxSpatialLayer, maxTemporalLayer } = autoQuality;
+    const { maxSpatialLayer, maxTemporalLayer } = autoQuality;
+    let { spatialLayer, temporalLayer } = autoQuality;
 
     // Softened logic tailored for movie playback:
     // Only drop 1 temporal layer (e.g. from 60 to 30fps) instead of plummeting to 15fps or 0fps

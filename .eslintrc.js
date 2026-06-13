@@ -30,9 +30,9 @@ module.exports = {
     'no-trailing-spaces': 'warn',
     'prefer-const': 'warn',
     'semi': ['error', 'always'],
-    'quotes': ['warn', 'single'],
-    'indent': ['warn', 2],
-    'comma-dangle': ['warn', 'always-multiline'],
+    'quotes': 'off',
+    'indent': 'off',
+    'comma-dangle': 'off',
   },
   globals: {
     // Browser globals

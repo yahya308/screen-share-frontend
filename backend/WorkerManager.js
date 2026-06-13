@@ -62,7 +62,7 @@ class WorkerManager {
         let selectedWorker = this.workers[0];
         let selectedIndex = 0;
 
-        this.workerStats.forEach((stats, pid) => {
+        this.workerStats.forEach((stats) => {
             const load = stats.consumers + stats.producers;
             if (load < minLoad) {
                 minLoad = load;

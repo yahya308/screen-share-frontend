@@ -393,12 +393,12 @@ class RoomManager {
         const roomState = this.rooms.get(roomId);
         if (!roomState) return;
 
-        roomState.consumers.forEach(cd => { try { cd.consumer?.close(); } catch (e) {} });
-        roomState.producers.forEach(p => { try { p.close(); } catch (e) {} });
-        roomState.transports.forEach(t => { try { t.close(); } catch (e) {} });
+        roomState.consumers.forEach(cd => { try { cd.consumer?.close(); } catch (e) { /* yoksay */ } });
+        roomState.producers.forEach(p => { try { p.close(); } catch (e) { /* yoksay */ } });
+        roomState.transports.forEach(t => { try { t.close(); } catch (e) { /* yoksay */ } });
         roomState.pipeTransports.forEach(pipe => {
-            try { pipe.local?.close(); } catch (e) {}
-            try { pipe.remote?.close(); } catch (e) {}
+            try { pipe.local?.close(); } catch (e) { /* yoksay */ }
+            try { pipe.remote?.close(); } catch (e) { /* yoksay */ }
         });
 
         this.workerManager.removeRouter(roomState.workerIndex, roomId);

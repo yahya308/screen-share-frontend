@@ -31,7 +31,6 @@ let systemAudioTrack = null;
 let micTrack         = null;   // Admin own mic track
 let viewerMicTrack   = null;   // Viewer mic track
 
-let audioContext     = null;
 const consumers      = new Map(); // consumerId -> consumer
 
 // Audio oynatma state'i — video mute'tan BAĞIMSIZ (B4 düzeltmesi)
@@ -40,7 +39,6 @@ let audioMutedState  = false;
 const pendingAudioElements = new Set();
 
 let isAdmin          = false;
-let myNickname       = '';
 let mySocketId       = '';
 let adminSocketId    = null;   // U1: yayın sahibi konuşunca video kenarını vurgula
 
@@ -149,7 +147,6 @@ const streamStatusBadge = document.getElementById('streamStatusBadge');
 const streamTimerEl     = document.getElementById('streamTimer');
 const adminStreamInfo   = document.getElementById('adminStreamInfo');
 const adminTimerEl      = document.getElementById('adminTimer');
-const connQuality       = document.getElementById('connQuality');
 const connDot           = document.getElementById('connDot');
 const connText          = document.getElementById('connText');
 const presetButtons     = document.querySelectorAll('.preset-btn');
@@ -219,7 +216,6 @@ async function initSocket(nickname) {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000
     });
-    myNickname = nickname;
 
     registerSocketEvents();
 
@@ -259,7 +255,7 @@ async function initSocket(nickname) {
         }
     });
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', () => {
         showToast('Sunucu bağlantısı kesildi, yeniden bağlanılıyor...', 'warning');
     });
 
@@ -300,7 +296,7 @@ function registerSocketEvents() {
     socket.on('producer-closed', ({ remoteProducerId }) => {
         // B2b: Bu artık backup görevi görür — asıl temizlik consumer'ın
         // 'producerclose' event'inde (attachConsumerCleanup) yapılır.
-        for (const [id, consumer] of [...consumers]) {
+        for (const [, consumer] of [...consumers]) {
             if (consumer.producerId === remoteProducerId) {
                 closeAndRemoveConsumer(consumer);
             }
@@ -575,15 +571,15 @@ function resetMediaState() {
     consumers.clear();
     videoConsumer = null;
     // Transport'ları kapat
-    try { if (producerTransport) producerTransport.close(); } catch (e) {}
-    try { if (consumerTransport) consumerTransport.close(); } catch (e) {}
-    try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) {}
+    try { if (producerTransport) producerTransport.close(); } catch (e) { /* yoksay */ }
+    try { if (consumerTransport) consumerTransport.close(); } catch (e) { /* yoksay */ }
+    try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) { /* yoksay */ }
     producerTransport = consumerTransport = viewerSendTransport = null;
     // Device'ı sıfırla (yeniden load edilebilmesi için)
     device = null;
     // Video alanını temizle
     if (remoteVideo.srcObject) {
-        try { remoteVideo.srcObject.getTracks().forEach(t => t.stop()); } catch (e) {}
+        try { remoteVideo.srcObject.getTracks().forEach(t => t.stop()); } catch (e) { /* yoksay */ }
         remoteVideo.srcObject = null;
     }
     // Konuşma göstergesini sıfırla
@@ -738,7 +734,7 @@ async function consumeProducer(producerId, meta = null) {
                 const receivers = consumerTransport.handler._pc.getReceivers();
                 const vr = receivers.find(r => r.track?.kind === 'video');
                 if (vr && 'jitterBufferTarget' in vr) vr.jitterBufferTarget = 100;
-            } catch (e) {}
+            } catch (e) { /* yoksay */ }
         }
 
         if (params.kind === 'video') {
@@ -839,15 +835,15 @@ function closeAndRemoveConsumer(consumer) {
     if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
         const el = consumer.appData.audioEl;
         pendingAudioElements.delete(el);
-        try { el.pause(); } catch (e) {}
-        try { el.srcObject = null; } catch (e) {}
+        try { el.pause(); } catch (e) { /* yoksay */ }
+        try { el.srcObject = null; } catch (e) { /* yoksay */ }
         el.remove();
         consumer.appData.audioEl = null;
     } else if (consumer.kind === 'video' && remoteVideo.srcObject) {
-        try { remoteVideo.srcObject.removeTrack(consumer.track); } catch (e) {}
+        try { remoteVideo.srcObject.removeTrack(consumer.track); } catch (e) { /* yoksay */ }
     }
 
-    if (wasInMap) { try { consumer.close(); } catch (e) {} }
+    if (wasInMap) { try { consumer.close(); } catch (e) { /* yoksay */ } }
 }
 
 /**
@@ -1014,7 +1010,7 @@ btnStopStream.addEventListener('click', stopStream);
 
 function stopStream() {
     [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
-        if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) {} }
+        if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
     videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
 
@@ -1076,7 +1072,7 @@ btnToggleMic.addEventListener('click', async () => {
         updateAdminMicButton(false);
         if (micProducer) {
             socket.emit('producer-closing', { producerId: micProducer.id });
-            try { micProducer.close(); } catch(e) {}
+            try { micProducer.close(); } catch(e) { /* yoksay */ }
             micProducer = null;
         }
         stopVAD();
@@ -1157,7 +1153,7 @@ btnToggleAudio.addEventListener('click', async () => {
         // U3: track'i durdurma — sadece producer'ı kapat. Böylece tekrar açarken
         // yeniden getDisplayMedia çağrılmaz (kullanıcıyı tekrar prompt etmez).
         socket.emit('producer-closing', { producerId: systemAudioProducer.id });
-        try { systemAudioProducer.close(); } catch(e) {}
+        try { systemAudioProducer.close(); } catch(e) { /* yoksay */ }
         systemAudioProducer = null;
         updateAdminAudioButton(false);
     } else {
@@ -1312,7 +1308,7 @@ function closeViewerMic() {
     stopVAD();
     if (viewerMicProducer) {
         socket.emit('producer-closing', { producerId: viewerMicProducer.id });
-        try { viewerMicProducer.close(); } catch (e) {}
+        try { viewerMicProducer.close(); } catch (e) { /* yoksay */ }
         viewerMicProducer = null;
     }
     if (viewerMicTrack) { viewerMicTrack.stop(); viewerMicTrack = null; }
@@ -1386,7 +1382,7 @@ function setupVAD(stream) {
 
 function stopVAD() {
     if (vadInterval) { clearInterval(vadInterval); vadInterval = null; }
-    if (vadContext) { try { vadContext.close(); } catch (e) {} vadContext = null; }
+    if (vadContext) { try { vadContext.close(); } catch (e) { /* yoksay */ } vadContext = null; }
     vadAnalyser = null;
     vadWasSpeaking = false;
 }
@@ -1485,7 +1481,7 @@ volumeSlider?.addEventListener('input', (e) => {
     const v = parseFloat(e.target.value);
     remoteVideo.volume = v;
     // Seviyeyi kaydet (A8)
-    try { localStorage.setItem('velo_volume', String(v)); } catch (e2) {}
+    try { localStorage.setItem('velo_volume', String(v)); } catch (e2) { /* yoksay */ }
     syncAllAudioElements();
 });
 
@@ -1601,7 +1597,7 @@ function startStatsLoop(isSender) {
                 showToast._lastLowQualityWarn = now2;
                 showToast('Bağlantı zayıf görünüyor, görüntü kalitesi düşebilir', 'warning');
             }
-        } catch (e) {}
+        } catch (e) { /* yoksay */ }
     }, 2000);
 }
 
@@ -1707,9 +1703,8 @@ btnConfirmLeave?.addEventListener('click', () => {
                 remoteVideo.volume = v;
             }
         }
-    } catch (e) {}
+    } catch (e) { /* yoksay */ }
 
     const nickname = await showNicknameModal();
-    myNickname = nickname;
     await initSocket(nickname);
 })();

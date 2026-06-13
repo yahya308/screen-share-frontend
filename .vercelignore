@@ -1,0 +1,25 @@
+# Backend (runs on separate VPS with mediasoup — not deployable on Vercel)
+backend/
+server.dev.js
+
+# Infrastructure
+nginx/
+docker-compose.yml
+deploy-oracle.sh
+
+# Docs
+docs/
+ORACLE_CLOUD_DEPLOYMENT.md
+
+# Dev tooling
+.eslintrc.js
+.eslintignore
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Misc
+*.md
+.env*
+.env.example
