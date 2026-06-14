@@ -48,6 +48,12 @@ let chatEnabled      = true;  // Is chat open? (admin controls this)
 let currentQuality   = 'auto';
 let videoConsumer    = null;
 const iceRestartState = new WeakMap();
+let initMediasoupPromise = null;
+let producerTransportPromise = null;
+let consumerTransportPromise = null;
+let viewerSendTransportPromise = null;
+const consumerByProducerId = new Map();
+const consumingProducerIds = new Set();
 
 // Stream timer
 let streamTimerInterval = null;
@@ -224,7 +230,7 @@ async function initSocket(nickname) {
         console.log('Connected:', socket.id);
 
         if (isAdminMode) {
-            socket.emit('admin-rejoin', { roomId, nickname }, (result) => {
+            socket.emit('admin-rejoin', { roomId, nickname }, async (result) => {
                 if (result.error) {
                     if (result.error.includes('nickname') || result.error.includes('Nickname')) {
                         sessionStorage.removeItem('velo_nickname');
@@ -247,7 +253,7 @@ async function initSocket(nickname) {
                 setupAdminUI();
                 updateViewerMicToggle();
                 updateChatToggle();
-                initMediasoup();
+                await initMediasoup();
             });
         } else {
             const storedPassword = sessionStorage.getItem(`room_password_${roomId}`);
@@ -287,8 +293,9 @@ function registerSocketEvents() {
     socket.on('stream-started', () => {
         waitingOverlay.classList.add('hidden');
         pausedOverlay.classList.add('hidden');
-        if (!device) initMediasoup();
-        else getProducers();
+        void initMediasoup().then(() => {
+            if (consumerTransport && !consumerTransport.closed) getProducers();
+        }).catch((err) => console.error('initMediasoup error:', err));
     });
 
     socket.on('stream-paused', () => pausedOverlay.classList.remove('hidden'));
@@ -356,7 +363,7 @@ function registerSocketEvents() {
 // ==================== JOIN / SETUP ====================
 
 function attemptJoinRoom(password, nickname) {
-    socket.emit('join-room', { roomId, password, nickname }, (result) => {
+    socket.emit('join-room', { roomId, password, nickname }, async (result) => {
         if (result.error) {
             if (result.needPassword) {
                 showPasswordModal(nickname);
@@ -388,7 +395,7 @@ function attemptJoinRoom(password, nickname) {
         updateViewerMicButton();
         updateChatUI();
 
-        if (result.isStreaming) initMediasoup();
+        if (result.isStreaming) await initMediasoup();
     });
 }
 
@@ -564,6 +571,8 @@ window.banUser = function(targetSocketId) {
 function resetMediaState() {
     // Bekleyen autoplay elementlerini temizle
     pendingAudioElements.clear();
+    consumerByProducerId.clear();
+    consumingProducerIds.clear();
     // Tüm consumer'ları ve audio elementlerini kapat
     for (const [, consumer] of [...consumers]) {
         closeAndRemoveConsumer(consumer);
@@ -575,6 +584,7 @@ function resetMediaState() {
     try { if (consumerTransport) consumerTransport.close(); } catch (e) { /* yoksay */ }
     try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) { /* yoksay */ }
     producerTransport = consumerTransport = viewerSendTransport = null;
+    producerTransportPromise = consumerTransportPromise = viewerSendTransportPromise = null;
     // Device'ı sıfırla (yeniden load edilebilmesi için)
     device = null;
     // Video alanını temizle
@@ -587,23 +597,43 @@ function resetMediaState() {
 }
 
 async function initMediasoup() {
-    socket.emit('getRouterRtpCapabilities', async (rtpCapabilities) => {
-        if (rtpCapabilities.error) { showToast(rtpCapabilities.error); return; }
+    if (initMediasoupPromise) return initMediasoupPromise;
+    const hasActiveState =
+        device &&
+        consumerTransport &&
+        !consumerTransport.closed &&
+        (!isAdmin || (producerTransport && !producerTransport.closed));
 
-        // Cihaz zaten yüklüyse (reconnect / yeniden giriş) eski state'i temizle
-        if (device) resetMediaState();
+    if (hasActiveState) return device;
 
-        device = new Device();
-        await device.load({ routerRtpCapabilities: rtpCapabilities });
+    initMediasoupPromise = new Promise((resolve, reject) => {
+        socket.emit('getRouterRtpCapabilities', async (rtpCapabilities) => {
+            try {
+                if (rtpCapabilities?.error) throw new Error(rtpCapabilities.error);
 
-        if (isAdmin) {
-            createSendTransport();
-            createRecvTransport();
-        }
-        else {
-            createRecvTransport();
-        }
+                // Cihaz zaten yüklüyse (reconnect / yeniden giriş) eski state'i temizle
+                if (device) resetMediaState();
+
+                device = new Device();
+                await device.load({ routerRtpCapabilities: rtpCapabilities });
+
+                if (isAdmin) {
+                    await createSendTransportAsync();
+                    await createRecvTransportAsync();
+                } else {
+                    await createRecvTransportAsync();
+                }
+
+                resolve(device);
+            } catch (err) {
+                reject(err);
+            } finally {
+                initMediasoupPromise = null;
+            }
+        });
     });
+
+    return initMediasoupPromise;
 }
 
 function createSendTransport() {
@@ -611,7 +641,10 @@ function createSendTransport() {
 }
 
 function createSendTransportAsync() {
-    return new Promise((resolve, reject) => {
+    if (producerTransport && !producerTransport.closed) return Promise.resolve(producerTransport);
+    if (producerTransportPromise) return producerTransportPromise;
+
+    producerTransportPromise = new Promise((resolve, reject) => {
         socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
             if (params.error) { console.error(params.error); reject(new Error(params.error)); return; }
 
@@ -630,28 +663,53 @@ function createSendTransportAsync() {
 
             resolve(producerTransport);
         });
+    }).finally(() => {
+        producerTransportPromise = null;
     });
+
+    return producerTransportPromise;
 }
 
 function createRecvTransport() {
-    socket.emit('createWebRtcTransport', { sender: false }, ({ params }) => {
-        if (params.error) { console.error(params.error); return; }
+    return createRecvTransportAsync();
+}
 
-        consumerTransport = device.createRecvTransport(params);
-        attachTransportHandlers(consumerTransport);
+function createRecvTransportAsync() {
+    if (consumerTransport && !consumerTransport.closed) return Promise.resolve(consumerTransport);
+    if (consumerTransportPromise) return consumerTransportPromise;
 
-        consumerTransport.on('connect', ({ dtlsParameters }, cb) => {
-            socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters });
-            cb();
+    consumerTransportPromise = new Promise((resolve, reject) => {
+        socket.emit('createWebRtcTransport', { sender: false }, ({ params }) => {
+            if (params.error) { console.error(params.error); reject(new Error(params.error)); return; }
+
+            consumerTransport = device.createRecvTransport(params);
+            attachTransportHandlers(consumerTransport);
+
+            consumerTransport.on('connect', ({ dtlsParameters }, cb) => {
+                socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters });
+                cb();
+            });
+
+            getProducers();
+            resolve(consumerTransport);
         });
-
-        getProducers();
+    }).finally(() => {
+        consumerTransportPromise = null;
     });
+
+    return consumerTransportPromise;
 }
 
 /** Create send transport for viewer mic */
 function createViewerSendTransport() {
-    return new Promise((resolve, reject) => {
+    return createViewerSendTransportAsync();
+}
+
+function createViewerSendTransportAsync() {
+    if (viewerSendTransport && !viewerSendTransport.closed) return Promise.resolve(viewerSendTransport);
+    if (viewerSendTransportPromise) return viewerSendTransportPromise;
+
+    viewerSendTransportPromise = new Promise((resolve, reject) => {
         socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
             if (params.error) { reject(new Error(params.error)); return; }
 
@@ -670,7 +728,11 @@ function createViewerSendTransport() {
 
             resolve(viewerSendTransport);
         });
+    }).finally(() => {
+        viewerSendTransportPromise = null;
     });
+
+    return viewerSendTransportPromise;
 }
 
 function attachTransportHandlers(transport) {
@@ -710,75 +772,84 @@ function getProducers() {
 }
 
 async function consumeProducer(producerId, meta = null) {
-    if (!consumerTransport) return;
+    if (!consumerTransport || consumerTransport.closed) return;
+    if (consumerByProducerId.has(producerId)) return;
+    if (consumingProducerIds.has(producerId)) return;
+
+    consumingProducerIds.add(producerId);
 
     socket.emit('consume', {
         transportId: consumerTransport.id,
         producerId,
         rtpCapabilities: device.rtpCapabilities
     }, async ({ params }) => {
-        if (params.error) { console.error(params.error); return; }
+        try {
+            if (params.error) { console.error(params.error); return; }
 
-        const consumer = await consumerTransport.consume({
-            id: params.id,
-            producerId: params.producerId,
-            kind: params.kind,
-            rtpParameters: params.rtpParameters
-        });
-
-        consumers.set(consumer.id, consumer);
-
-        // B2b: Producer kapanınca veya track biterse consumer'ı + DOM elementini
-        // GÜVENLE temizle. Sadece socket 'producer-closed' event'ine güvenmek
-        // yarış koşullarına (stale/eksik audio element) yol açıyordu.
-        attachConsumerCleanup(consumer);
-
-        if (params.kind === 'video') {
-            videoConsumer = consumer;
-            if (!statsStarted) { startStatsLoop(false); statsStarted = true; }
-            setTimeout(() => setConsumerQuality(consumer, currentQuality), 500);
-
-            try {
-                const receivers = consumerTransport.handler._pc.getReceivers();
-                const vr = receivers.find(r => r.track?.kind === 'video');
-                if (vr && 'jitterBufferTarget' in vr) vr.jitterBufferTarget = 100;
-            } catch (e) { /* yoksay */ }
-        }
-
-        if (params.kind === 'video') {
-            if (remoteVideo.srcObject) {
-                remoteVideo.srcObject.addTrack(consumer.track);
-            } else {
-                remoteVideo.srcObject = new MediaStream([consumer.track]);
-            }
-            remoteVideo.playsInline = true;
-            remoteVideo.addEventListener('stalled', () => {
-                if (videoConsumer) socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
+            const consumer = await consumerTransport.consume({
+                id: params.id,
+                producerId: params.producerId,
+                kind: params.kind,
+                rtpParameters: params.rtpParameters
             });
-            if (!consumer._autoPlaySet) {
-                consumer._autoPlaySet = true;
-                remoteVideo.addEventListener('loadeddata', () => autoPlayVideo(), { once: true });
+
+            consumers.set(consumer.id, consumer);
+            consumerByProducerId.set(producerId, consumer);
+
+            // B2b: Producer kapanınca veya track biterse consumer'ı + DOM elementini
+            // GÜVENLE temizle. Sadece socket 'producer-closed' event'ine güvenmek
+            // yarış koşullarına (stale/eksik audio element) yol açıyordu.
+            attachConsumerCleanup(consumer);
+
+            if (params.kind === 'video') {
+                videoConsumer = consumer;
+                if (!statsStarted) { startStatsLoop(false); statsStarted = true; }
+                setTimeout(() => setConsumerQuality(consumer, currentQuality), 500);
+
+                try {
+                    const receivers = consumerTransport.handler._pc.getReceivers();
+                    const vr = receivers.find(r => r.track?.kind === 'video');
+                    if (vr && 'jitterBufferTarget' in vr) vr.jitterBufferTarget = 100;
+                } catch (e) { /* yoksay */ }
             }
-        } else if (params.kind === 'audio') {
-            // B2a/B4: Audio elementi bağımsız state ile oluştur ve KESİNLİKLE play() çağır
-            const audioEl = document.createElement('audio');
-            audioEl.id = `audio-consumer-${consumer.id}`;
-            audioEl.autoplay = true;
-            audioEl.playsInline = true;
-            audioEl.volume = volumeSlider ? parseFloat(volumeSlider.value) : 1;
-            // Video mute'una BAĞLANMIYOR — bağımsız audioMutedState (B4)
-            audioEl.muted = audioMutedState;
-            audioEl.srcObject = new MediaStream([consumer.track]);
-            document.body.appendChild(audioEl);
-            consumer.appData = { ...(consumer.appData || {}), audioEl, source: meta?.source || null };
-            // Hemen play() dene — autoplay reddedilirse playAudioElement() handle eder
-            playAudioElement(audioEl);
+
+            if (params.kind === 'video') {
+                if (remoteVideo.srcObject) {
+                    remoteVideo.srcObject.addTrack(consumer.track);
+                } else {
+                    remoteVideo.srcObject = new MediaStream([consumer.track]);
+                }
+                remoteVideo.playsInline = true;
+                remoteVideo.addEventListener('stalled', () => {
+                    if (videoConsumer) socket.emit('requestKeyFrame', { consumerId: videoConsumer.id });
+                });
+                if (!consumer._autoPlaySet) {
+                    consumer._autoPlaySet = true;
+                    remoteVideo.addEventListener('loadeddata', () => autoPlayVideo(), { once: true });
+                }
+            } else if (params.kind === 'audio') {
+                // B2a/B4: Audio elementi bağımsız state ile oluştur ve KESİNLİKLE play() çağır
+                const audioEl = document.createElement('audio');
+                audioEl.id = `audio-consumer-${consumer.id}`;
+                audioEl.autoplay = true;
+                audioEl.playsInline = true;
+                audioEl.volume = volumeSlider ? parseFloat(volumeSlider.value) : 1;
+                // Video mute'una BAĞLANMIYOR — bağımsız audioMutedState (B4)
+                audioEl.muted = audioMutedState;
+                audioEl.srcObject = new MediaStream([consumer.track]);
+                document.body.appendChild(audioEl);
+                consumer.appData = { ...(consumer.appData || {}), audioEl, source: meta?.source || null };
+                // Hemen play() dene — autoplay reddedilirse playAudioElement() handle eder
+                playAudioElement(audioEl);
+            }
+
+            waitingOverlay.classList.add('hidden');
+            pausedOverlay.classList.add('hidden');
+
+            socket.emit('resume', { consumerId: consumer.id });
+        } finally {
+            consumingProducerIds.delete(producerId);
         }
-
-        waitingOverlay.classList.add('hidden');
-        pausedOverlay.classList.add('hidden');
-
-        socket.emit('resume', { consumerId: consumer.id });
     });
 }
 
@@ -838,6 +909,10 @@ setupAudioGestureUnlock();
 function closeAndRemoveConsumer(consumer) {
     if (!consumer) return;
     const wasInMap = consumers.delete(consumer.id);
+    if (consumer.producerId) {
+        const mapped = consumerByProducerId.get(consumer.producerId);
+        if (mapped === consumer) consumerByProducerId.delete(consumer.producerId);
+    }
     if (videoConsumer === consumer) videoConsumer = null;
 
     if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
@@ -937,8 +1012,8 @@ presetButtons.forEach(btn => {
 });
 
 btnStartStream.addEventListener('click', async () => {
-    if (!device) await initMediasoup();
-    startStream();
+    await initMediasoup();
+    await startStream();
 });
 
 async function startStream() {
@@ -955,14 +1030,13 @@ async function startStream() {
         producerTransport = null;
     }
 
-    await createSendTransportAsync();
-
     const height  = parseInt(resSelect.value);
     const fps     = parseInt(fpsSelect.value);
     const bitrate = parseInt(bitrateInput.value) * 1000;
     const width   = Math.round(height * (16 / 9));
 
     try {
+        await createSendTransportAsync();
         const stream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: { ideal: width, max: 1920 }, height: { ideal: height, max: 1080 }, frameRate: { ideal: fps, max: 60 } },
             audio: true
@@ -1279,18 +1353,15 @@ async function openViewerMic() {
         });
         viewerMicTrack = stream.getAudioTracks()[0];
 
-        // Ensure we have a device loaded
-        if (!device) await initMediasoup();
+        // Ensure we have a healthy mediasoup state
+        await initMediasoup();
 
         // Ensure recv transport exists (viewers need it to hear others)
-        if (!consumerTransport) await new Promise(resolve => {
-            createRecvTransport();
-            setTimeout(resolve, 800);
-        });
+        if (!consumerTransport || consumerTransport.closed) await createRecvTransportAsync();
 
         // Create send transport if not exists
         if (!viewerSendTransport || viewerSendTransport.closed) {
-            await createViewerSendTransport();
+            await createViewerSendTransportAsync();
         }
 
         viewerMicProducer = await viewerSendTransport.produce({

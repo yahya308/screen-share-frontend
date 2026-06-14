@@ -439,6 +439,7 @@ io.on('connection', (socket) => {
         try {
             const roomState = socketData.roomState;
             const transport = await roomState.router.createWebRtcTransport(config.mediasoup.webRtcTransport);
+            const transportKey = socket.id + (sender ? '-send' : '-recv');
 
             try {
                 if (sender && config.mediasoup.webRtcTransport.maxIncomingBitrate) {
@@ -451,7 +452,25 @@ io.on('connection', (socket) => {
                 console.warn(`⚠️ Transport bitrate tuning skipped: ${e.message}`);
             }
 
-            roomState.transports.set(socket.id + (sender ? '-send' : '-recv'), transport);
+            roomState.transports.set(transportKey, transport);
+
+            transport.on('close', () => {
+                if (roomState.transports.get(transportKey) === transport) {
+                    roomState.transports.delete(transportKey);
+                }
+
+                if (sender) {
+                    const { closedProducerIds, hadVideo } = closeProducersOwnedBySocket(roomState, socket.id, workerManager);
+                    if (hadVideo) {
+                        roomManager.setStreamingStatus(socketData.roomId, false);
+                        socket.to(socketData.roomId).emit('stream-paused');
+                    }
+                    closedProducerIds.forEach(pid =>
+                        socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: pid }));
+                } else {
+                    closeConsumersOwnedBySocket(roomState, socket.id, workerManager);
+                }
+            });
 
             callback({
                 params: {
@@ -550,7 +569,7 @@ io.on('connection', (socket) => {
 
         const ids = [];
         for (const [id, producer] of socketData.roomState.producers) {
-            if (producer.appData?.socketId !== socket.id) {
+            if (producer.appData?.socketId !== socket.id && !producer.closed) {
                 ids.push(id);
             }
         }
@@ -792,6 +811,38 @@ function findTransport(roomState, transportId) {
         if (transport.id === transportId) return transport;
     }
     return null;
+}
+
+function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef) {
+    const closedProducerIds = [];
+    let hadVideo = false;
+
+    for (const [producerId, producer] of [...roomState.producers]) {
+        if (producer.appData?.socketId !== socketId) continue;
+        hadVideo = hadVideo || producer.kind === 'video';
+        try { producer.close(); } catch (e) { /* yoksay */ }
+        if (roomState.producers.delete(producerId)) {
+            workerManagerRef.decrementProducers(roomState.workerIndex);
+        }
+        closedProducerIds.push(producerId);
+    }
+
+    return { closedProducerIds, hadVideo };
+}
+
+function closeConsumersOwnedBySocket(roomState, socketId, workerManagerRef) {
+    const closedConsumerIds = [];
+
+    for (const [consumerId, consumerData] of [...roomState.consumers]) {
+        if (consumerData.socketId !== socketId) continue;
+        try { consumerData.consumer.close(); } catch (e) { /* yoksay */ }
+        if (roomState.consumers.delete(consumerId)) {
+            workerManagerRef.decrementConsumers(roomState.workerIndex);
+        }
+        closedConsumerIds.push(consumerId);
+    }
+
+    return closedConsumerIds;
 }
 
 // ==================== STARTUP ====================
