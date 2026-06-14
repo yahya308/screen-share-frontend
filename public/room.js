@@ -18,6 +18,7 @@ if (!roomId) window.location.href = 'index.html';
 let socket;
 let device;
 let producerTransport;    // Admin: send transport for screen share
+let adminMicTransport;    // Admin: independent send transport for mic
 let consumerTransport;    // Everyone: receive transport
 let viewerSendTransport;  // Viewers: send transport for mic
 
@@ -50,6 +51,7 @@ let videoConsumer    = null;
 const iceRestartState = new WeakMap();
 let initMediasoupPromise = null;
 let producerTransportPromise = null;
+let adminMicTransportPromise = null;
 let consumerTransportPromise = null;
 let viewerSendTransportPromise = null;
 let adminMicPublishPromise = null;
@@ -595,10 +597,11 @@ function resetMediaState() {
     videoConsumer = null;
     // Transport'ları kapat
     try { if (producerTransport) producerTransport.close(); } catch (e) { /* yoksay */ }
+    try { if (adminMicTransport) adminMicTransport.close(); } catch (e) { /* yoksay */ }
     try { if (consumerTransport) consumerTransport.close(); } catch (e) { /* yoksay */ }
     try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) { /* yoksay */ }
-    producerTransport = consumerTransport = viewerSendTransport = null;
-    producerTransportPromise = consumerTransportPromise = viewerSendTransportPromise = null;
+    producerTransport = adminMicTransport = consumerTransport = viewerSendTransport = null;
+    producerTransportPromise = adminMicTransportPromise = consumerTransportPromise = viewerSendTransportPromise = null;
     videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = viewerMicProducer = null;
     // Device'ı sıfırla (yeniden load edilebilmesi için)
     device = null;
@@ -703,6 +706,39 @@ function createSendTransportAsync() {
 
 function createRecvTransport() {
     return createRecvTransportAsync();
+}
+
+function createAdminMicTransportAsync() {
+    if (adminMicTransport && !adminMicTransport.closed) return Promise.resolve(adminMicTransport);
+    if (adminMicTransportPromise) return adminMicTransportPromise;
+
+    adminMicTransportPromise = new Promise((resolve, reject) => {
+        socket.emit('createWebRtcTransport', { sender: true }, ({ params }) => {
+            if (params.error) { reject(new Error(params.error)); return; }
+
+            adminMicTransport = device.createSendTransport(params);
+            attachTransportHandlers(adminMicTransport);
+            adminMicTransport.on('transportclose', () => {
+                adminMicTransport = null;
+                micProducer = null;
+            });
+
+            adminMicTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
+                connectTransportWithAckFallback(adminMicTransport, dtlsParameters, cb, errback);
+            });
+
+            adminMicTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errback) => {
+                socket.emit('transport-produce', { transportId: adminMicTransport.id, kind, rtpParameters, appData },
+                    ({ id, error }) => { if (error) { errback(new Error(error)); return; } cb({ id }); });
+            });
+
+            resolve(adminMicTransport);
+        });
+    }).finally(() => {
+        adminMicTransportPromise = null;
+    });
+
+    return adminMicTransportPromise;
 }
 
 function createRecvTransportAsync() {
@@ -1071,16 +1107,16 @@ async function startStream() {
         return;
     }
 
-    // Fresh sender transport keeps screen sharing reliable; keep micTrack alive
-    // and republish it on the new transport below.
-    [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
+    // Refresh only screen/system producers. Admin mic uses its own transport.
+    [videoProducer, systemAudioProducer, mixedAudioProducer].forEach(p => {
         if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
-    videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
+    videoProducer = systemAudioProducer = mixedAudioProducer = null;
 
     if (producerTransport) {
         try { producerTransport.close(); } catch (e) { /* yoksay */ }
         producerTransport = null;
+        if (micProducer?.closed) micProducer = null;
     }
 
     // Drop stale system audio tracks before asking for a fresh screen stream.
@@ -1096,7 +1132,6 @@ async function startStream() {
 
     try {
         await createSendTransportAsync();
-        await republishAdminMic();
         const stream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: { ideal: width, max: 1920 }, height: { ideal: height, max: 1080 }, frameRate: { ideal: fps, max: 60 } },
             audio: true
@@ -1198,11 +1233,11 @@ async function republishAdminMicUnlocked() {
     // Mikrofon track'i yoksa veya producer zaten varsa bir şey yapma
     if (!micTrack || micProducer) return;
 
-    if (!producerTransport || producerTransport.closed) {
-        await createSendTransportAsync();
+    if (!adminMicTransport || adminMicTransport.closed) {
+        await createAdminMicTransportAsync();
     }
     try {
-        micProducer = await producerTransport.produce({
+        micProducer = await adminMicTransport.produce({
             track: micTrack,
             codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 64000 },
             appData: { source: 'admin-mic' }
@@ -1226,6 +1261,10 @@ btnToggleMic.addEventListener('click', async () => {
             socket.emit('producer-closing', { producerId: micProducer.id });
             try { micProducer.close(); } catch(e) { /* yoksay */ }
             micProducer = null;
+        }
+        if (adminMicTransport) {
+            try { adminMicTransport.close(); } catch(e) { /* yoksay */ }
+            adminMicTransport = null;
         }
         stopVAD();
     } else {

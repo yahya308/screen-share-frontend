@@ -439,7 +439,7 @@ io.on('connection', (socket) => {
         try {
             const roomState = socketData.roomState;
             const transport = await roomState.router.createWebRtcTransport(config.mediasoup.webRtcTransport);
-            const transportKey = socket.id + (sender ? '-send' : '-recv');
+            const transportKey = `${socket.id}-${sender ? 'send' : 'recv'}-${transport.id}`;
 
             try {
                 if (sender && config.mediasoup.webRtcTransport.maxIncomingBitrate) {
