@@ -655,6 +655,23 @@ function createSendTransport() {
     return createSendTransportAsync();
 }
 
+function connectTransportWithAckFallback(transport, dtlsParameters, cb, errback) {
+    let settled = false;
+    const fallback = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cb();
+    }, 1500);
+
+    socket.emit('transport-connect', { transportId: transport.id, dtlsParameters }, (result = {}) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(fallback);
+        if (result.error) { errback(new Error(result.error)); return; }
+        cb();
+    });
+}
+
 function createSendTransportAsync() {
     if (producerTransport && !producerTransport.closed) return Promise.resolve(producerTransport);
     if (producerTransportPromise) return producerTransportPromise;
@@ -667,10 +684,7 @@ function createSendTransportAsync() {
             attachTransportHandlers(producerTransport);
 
             producerTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
-                socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters }, (result = {}) => {
-                    if (result.error) { errback(new Error(result.error)); return; }
-                    cb();
-                });
+                connectTransportWithAckFallback(producerTransport, dtlsParameters, cb, errback);
             });
 
             producerTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errback) => {
@@ -703,10 +717,7 @@ function createRecvTransportAsync() {
             attachTransportHandlers(consumerTransport);
 
             consumerTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
-                socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters }, (result = {}) => {
-                    if (result.error) { errback(new Error(result.error)); return; }
-                    cb();
-                });
+                connectTransportWithAckFallback(consumerTransport, dtlsParameters, cb, errback);
             });
 
             getProducers();
@@ -736,10 +747,7 @@ function createViewerSendTransportAsync() {
             attachTransportHandlers(viewerSendTransport);
 
             viewerSendTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
-                socket.emit('transport-connect', { transportId: viewerSendTransport.id, dtlsParameters }, (result = {}) => {
-                    if (result.error) { errback(new Error(result.error)); return; }
-                    cb();
-                });
+                connectTransportWithAckFallback(viewerSendTransport, dtlsParameters, cb, errback);
             });
 
             viewerSendTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errback) => {
