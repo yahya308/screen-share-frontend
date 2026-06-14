@@ -1063,11 +1063,17 @@ async function startStream() {
         return;
     }
 
-    // Refresh screen/system producers without touching the admin mic.
-    [videoProducer, systemAudioProducer, mixedAudioProducer].forEach(p => {
+    // Fresh sender transport keeps screen sharing reliable; keep micTrack alive
+    // and republish it on the new transport below.
+    [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
         if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
-    videoProducer = systemAudioProducer = mixedAudioProducer = null;
+    videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
+
+    if (producerTransport) {
+        try { producerTransport.close(); } catch (e) { /* yoksay */ }
+        producerTransport = null;
+    }
 
     // Drop stale system audio tracks before asking for a fresh screen stream.
     if (systemAudioTrack) {
