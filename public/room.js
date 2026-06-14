@@ -52,6 +52,8 @@ let initMediasoupPromise = null;
 let producerTransportPromise = null;
 let consumerTransportPromise = null;
 let viewerSendTransportPromise = null;
+let adminMicPublishPromise = null;
+let viewerMicOpenPromise = null;
 const consumerByProducerId = new Map();
 const consumingProducerIds = new Set();
 
@@ -254,6 +256,7 @@ async function initSocket(nickname) {
                 updateViewerMicToggle();
                 updateChatToggle();
                 await initMediasoup();
+                await republishAdminMic();
             });
         } else {
             const storedPassword = sessionStorage.getItem(`room_password_${roomId}`);
@@ -395,7 +398,8 @@ function attemptJoinRoom(password, nickname) {
         updateViewerMicButton();
         updateChatUI();
 
-        if (result.isStreaming) await initMediasoup();
+        if (result.isStreaming || viewerMicTrack?.readyState === 'live') await initMediasoup();
+        if (viewerMicTrack?.readyState === 'live') await republishViewerMic();
     });
 }
 
@@ -416,7 +420,7 @@ function showPasswordModal(nickname) {
         const pw = input.value;
         if (!pw) { errorEl.textContent = 'Şifre girin'; errorEl.classList.remove('hidden'); return; }
 
-        socket.emit('join-room', { roomId, password: pw, nickname }, (result) => {
+        socket.emit('join-room', { roomId, password: pw, nickname }, async (result) => {
             if (result.error) {
                 if (result.needPassword) {
                     errorEl.textContent = `Yanlış şifre (${result.remainingAttempts ?? '?'} deneme)`;
@@ -440,7 +444,8 @@ function showPasswordModal(nickname) {
             setupViewerUI();
             updateViewerMicButton();
             updateChatUI();
-            if (result.isStreaming) initMediasoup();
+            if (result.isStreaming || viewerMicTrack?.readyState === 'live') await initMediasoup();
+            if (viewerMicTrack?.readyState === 'live') await republishViewerMic();
         });
     };
 
@@ -455,6 +460,15 @@ function setupAdminUI() {
     localVideo.classList.remove('hidden');
     remoteVideo.classList.add('hidden');
     waitingOverlay.classList.add('hidden');
+
+    if (!canUseDisplayCapture()) {
+        btnStartStream.disabled = true;
+        btnStartStream.classList.add('opacity-60', 'cursor-not-allowed');
+        btnStartStream.title = 'Bu cihaz/tarayici ekran paylasimini desteklemiyor';
+        showToast('Bu cihazda ekran paylasimi desteklenmiyor. Mobilde izleyici modu onerilir.', 'warning', 6000);
+    } else if (isLikelyMobileDevice()) {
+        btnStartStream.title = 'Mobil tarayicilarda ekran paylasimi ve sistem sesi sinirli olabilir';
+    }
 
     window.addEventListener('beforeunload', (e) => {
         e.preventDefault();
@@ -585,6 +599,7 @@ function resetMediaState() {
     try { if (viewerSendTransport) viewerSendTransport.close(); } catch (e) { /* yoksay */ }
     producerTransport = consumerTransport = viewerSendTransport = null;
     producerTransportPromise = consumerTransportPromise = viewerSendTransportPromise = null;
+    videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = viewerMicProducer = null;
     // Device'ı sıfırla (yeniden load edilebilmesi için)
     device = null;
     // Video alanını temizle
@@ -651,14 +666,16 @@ function createSendTransportAsync() {
             producerTransport = device.createSendTransport(params);
             attachTransportHandlers(producerTransport);
 
-            producerTransport.on('connect', ({ dtlsParameters }, cb) => {
-                socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters });
-                cb();
+            producerTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
+                socket.emit('transport-connect', { transportId: producerTransport.id, dtlsParameters }, (result = {}) => {
+                    if (result.error) { errback(new Error(result.error)); return; }
+                    cb();
+                });
             });
 
-            producerTransport.on('produce', ({ kind, rtpParameters, appData }, cb) => {
+            producerTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errback) => {
                 socket.emit('transport-produce', { transportId: producerTransport.id, kind, rtpParameters, appData },
-                    ({ id, error }) => { if (error) console.error(error); cb({ id }); });
+                    ({ id, error }) => { if (error) { errback(new Error(error)); return; } cb({ id }); });
             });
 
             resolve(producerTransport);
@@ -685,9 +702,11 @@ function createRecvTransportAsync() {
             consumerTransport = device.createRecvTransport(params);
             attachTransportHandlers(consumerTransport);
 
-            consumerTransport.on('connect', ({ dtlsParameters }, cb) => {
-                socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters });
-                cb();
+            consumerTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
+                socket.emit('transport-connect', { transportId: consumerTransport.id, dtlsParameters }, (result = {}) => {
+                    if (result.error) { errback(new Error(result.error)); return; }
+                    cb();
+                });
             });
 
             getProducers();
@@ -716,14 +735,16 @@ function createViewerSendTransportAsync() {
             viewerSendTransport = device.createSendTransport(params);
             attachTransportHandlers(viewerSendTransport);
 
-            viewerSendTransport.on('connect', ({ dtlsParameters }, cb) => {
-                socket.emit('transport-connect', { transportId: viewerSendTransport.id, dtlsParameters });
-                cb();
+            viewerSendTransport.on('connect', ({ dtlsParameters }, cb, errback) => {
+                socket.emit('transport-connect', { transportId: viewerSendTransport.id, dtlsParameters }, (result = {}) => {
+                    if (result.error) { errback(new Error(result.error)); return; }
+                    cb();
+                });
             });
 
-            viewerSendTransport.on('produce', ({ kind, rtpParameters, appData }, cb) => {
+            viewerSendTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errback) => {
                 socket.emit('transport-produce', { transportId: viewerSendTransport.id, kind, rtpParameters, appData },
-                    ({ id, error }) => { if (error) { reject(new Error(error)); return; } cb({ id }); });
+                    ({ id, error }) => { if (error) { errback(new Error(error)); return; } cb({ id }); });
             });
 
             resolve(viewerSendTransport);
@@ -772,6 +793,15 @@ function getProducers() {
 }
 
 async function consumeProducer(producerId, meta = null) {
+    if (!device || !consumerTransport || consumerTransport.closed) {
+        try {
+            await initMediasoup();
+            if (!consumerTransport || consumerTransport.closed) await createRecvTransportAsync();
+        } catch (err) {
+            console.warn('consume init failed:', err.message);
+            return;
+        }
+    }
     if (!consumerTransport || consumerTransport.closed) return;
     if (consumerByProducerId.has(producerId)) return;
     if (consumingProducerIds.has(producerId)) return;
@@ -833,6 +863,8 @@ async function consumeProducer(producerId, meta = null) {
                 audioEl.id = `audio-consumer-${consumer.id}`;
                 audioEl.autoplay = true;
                 audioEl.playsInline = true;
+                audioEl.setAttribute('playsinline', '');
+                audioEl.preload = 'auto';
                 audioEl.volume = volumeSlider ? parseFloat(volumeSlider.value) : 1;
                 // Video mute'una BAĞLANMIYOR — bağımsız audioMutedState (B4)
                 audioEl.muted = audioMutedState;
@@ -841,6 +873,7 @@ async function consumeProducer(producerId, meta = null) {
                 consumer.appData = { ...(consumer.appData || {}), audioEl, source: meta?.source || null };
                 // Hemen play() dene — autoplay reddedilirse playAudioElement() handle eder
                 playAudioElement(audioEl);
+                unlockRemoteAudioPlayback();
             }
 
             waitingOverlay.classList.add('hidden');
@@ -895,9 +928,17 @@ function resumePendingAudio() {
 }
 
 // İlk etkileşimde (click/touch/keydown) bekleyen sesleri aç
+function unlockRemoteAudioPlayback() {
+    syncAllAudioElements();
+    resumePendingAudio();
+    if (remoteVideo?.srcObject && remoteVideo.paused) {
+        remoteVideo.play().then(() => updatePlayPauseIcon(true)).catch(() => { /* user gesture may still be required */ });
+    }
+}
+
 function setupAudioGestureUnlock() {
-    const unlock = () => resumePendingAudio();
-    ['click', 'touchstart', 'keydown'].forEach(evt =>
+    const unlock = () => unlockRemoteAudioPlayback();
+    ['click', 'touchstart', 'pointerdown', 'keydown'].forEach(evt =>
         document.addEventListener(evt, unlock, { once: false, passive: true }));
 }
 setupAudioGestureUnlock();
@@ -1017,17 +1058,21 @@ btnStartStream.addEventListener('click', async () => {
 });
 
 async function startStream() {
-    // Close existing producers
-    [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
+    if (!canUseDisplayCapture()) {
+        showToast('Bu cihaz/tarayici ekran paylasimini desteklemiyor. Mobilde izleyici modu onerilir.', 'warning', 6000);
+        return;
+    }
+
+    // Refresh screen/system producers without touching the admin mic.
+    [videoProducer, systemAudioProducer, mixedAudioProducer].forEach(p => {
         if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
-    videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
+    videoProducer = systemAudioProducer = mixedAudioProducer = null;
 
-    // KESİN ÇÖZÜM: RTP Extension / SDP collision hatasını önlemek için Send Transport'u
-    // tamamen kapatıp yepyeni, pırıl pırıl bir RTCPeerConnection ile taze başlatalım!
-    if (producerTransport) {
-        try { producerTransport.close(); } catch (e) { /* yoksay */ }
-        producerTransport = null;
+    // Drop stale system audio tracks before asking for a fresh screen stream.
+    if (systemAudioTrack) {
+        try { systemAudioTrack.stop(); } catch (e) { /* yoksay */ }
+        systemAudioTrack = null;
     }
 
     const height  = parseInt(resSelect.value);
@@ -1037,6 +1082,7 @@ async function startStream() {
 
     try {
         await createSendTransportAsync();
+        await republishAdminMic();
         const stream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: { ideal: width, max: 1920 }, height: { ideal: height, max: 1080 }, frameRate: { ideal: fps, max: 60 } },
             audio: true
@@ -1096,18 +1142,17 @@ async function startStream() {
 btnStopStream.addEventListener('click', stopStream);
 
 function stopStream() {
-    [videoProducer, systemAudioProducer, mixedAudioProducer, micProducer].forEach(p => {
+    [videoProducer, systemAudioProducer, mixedAudioProducer].forEach(p => {
         if (p) { socket.emit('producer-closing', { producerId: p.id }); try { p.close(); } catch (e) { /* yoksay */ } }
     });
-    videoProducer = systemAudioProducer = mixedAudioProducer = micProducer = null;
+    videoProducer = systemAudioProducer = mixedAudioProducer = null;
 
-    if (producerTransport) {
+    if (producerTransport && !micProducer) {
         try { producerTransport.close(); } catch (e) { /* yoksay */ }
         producerTransport = null;
     }
 
     if (systemAudioTrack) { systemAudioTrack.stop(); systemAudioTrack = null; }
-    if (micTrack) { micTrack.stop(); micTrack = null; }
 
     if (localVideo.srcObject) {
         localVideo.srcObject.getTracks().forEach(t => t.stop());
@@ -1116,7 +1161,6 @@ function stopStream() {
 
     btnStartStream.classList.remove('hidden');
     btnStopStream.classList.add('hidden');
-    updateAdminMicButton(false);
     updateAdminAudioButton(false);
     stopStreamTimer();
     showToast('Yayın durduruldu');
@@ -1129,6 +1173,14 @@ function stopStream() {
  * sonra (startStream sonunda veya transport gelince) eksik producer'ı kurar.
  */
 async function republishAdminMic() {
+    if (adminMicPublishPromise) return adminMicPublishPromise;
+    adminMicPublishPromise = republishAdminMicUnlocked().finally(() => {
+        adminMicPublishPromise = null;
+    });
+    return adminMicPublishPromise;
+}
+
+async function republishAdminMicUnlocked() {
     // Mikrofon track'i yoksa veya producer zaten varsa bir şey yapma
     if (!micTrack || micProducer) return;
 
@@ -1141,6 +1193,8 @@ async function republishAdminMic() {
             codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 64000 },
             appData: { source: 'admin-mic' }
         });
+        micProducer.on('transportclose', () => { micProducer = null; });
+        micProducer.on('trackended', () => { micProducer = null; updateAdminMicButton(false); });
         console.log('🎤 Admin mic producer oluşturuldu:', micProducer.id);
     } catch (err) {
         console.error('Admin mic republish hatası:', err);
@@ -1163,6 +1217,9 @@ btnToggleMic.addEventListener('click', async () => {
     } else {
         // --- Mikrofonu AÇ ---
         try {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                throw new Error('Bu tarayici mikrofon erisimini desteklemiyor');
+            }
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
@@ -1173,10 +1230,12 @@ btnToggleMic.addEventListener('click', async () => {
                 }
             });
             micTrack = stream.getAudioTracks()[0];
+            unlockRemoteAudioPlayback();
             updateAdminMicButton(true);
             // Producer'ı oluştur (transport varsa). Yoksa startStream sonunda
             // republishAdminMic() ile tamamlanacak (B1 düzeltmesi).
             await republishAdminMic();
+            unlockRemoteAudioPlayback();
             setupVAD(stream);
         } catch (err) {
             console.error('Mic error:', err);
@@ -1339,9 +1398,20 @@ btnViewerMic.addEventListener('click', async () => {
 });
 
 async function openViewerMic() {
+    if (viewerMicOpenPromise) return viewerMicOpenPromise;
+    viewerMicOpenPromise = openViewerMicUnlocked().finally(() => {
+        viewerMicOpenPromise = null;
+    });
+    return viewerMicOpenPromise;
+}
+
+async function openViewerMicUnlocked() {
     if (!viewerMicEnabled) return;
 
     try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Bu tarayici mikrofon erisimini desteklemiyor');
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: true,
@@ -1352,6 +1422,7 @@ async function openViewerMic() {
             }
         });
         viewerMicTrack = stream.getAudioTracks()[0];
+        unlockRemoteAudioPlayback();
 
         // Ensure we have a healthy mediasoup state
         await initMediasoup();
@@ -1377,14 +1448,52 @@ async function openViewerMic() {
 
         console.log('🎤 Viewer mic producer created:', viewerMicProducer.id);
 
+        viewerMicProducer.on('transportclose', () => {
+            viewerMicProducer = null;
+            updateViewerMicButton(false);
+        });
+        viewerMicProducer.on('trackended', () => closeViewerMic());
+
         setupVAD(stream);
         updateViewerMicButton(true);
+        unlockRemoteAudioPlayback();
 
         viewerMicTrack.onended = () => closeViewerMic();
     } catch (err) {
         console.error('Viewer mic error:', err);
+        if (viewerMicProducer) { try { viewerMicProducer.close(); } catch (e) { /* yoksay */ } viewerMicProducer = null; }
+        if (viewerMicTrack) { try { viewerMicTrack.stop(); } catch (e) { /* yoksay */ } viewerMicTrack = null; }
+        updateViewerMicButton(false);
         showToast('Mikrofon açılamadı: ' + (err.message || 'İzin reddedildi'));
     }
+}
+
+async function republishViewerMic() {
+    if (!viewerMicEnabled || !viewerMicTrack || viewerMicTrack.readyState !== 'live' || viewerMicProducer) return;
+
+    await initMediasoup();
+    if (!consumerTransport || consumerTransport.closed) await createRecvTransportAsync();
+    if (!viewerSendTransport || viewerSendTransport.closed) await createViewerSendTransportAsync();
+
+    viewerMicProducer = await viewerSendTransport.produce({
+        track: viewerMicTrack,
+        codecOptions: {
+            opusStereo: 0,
+            opusFec: 1,
+            opusDtx: 0,
+            opusMaxAverageBitrate: 64000
+        },
+        appData: { source: 'viewer-mic' }
+    });
+    viewerMicProducer.on('transportclose', () => {
+        viewerMicProducer = null;
+        updateViewerMicButton(false);
+    });
+    viewerMicProducer.on('trackended', () => closeViewerMic());
+
+    setupVAD(new MediaStream([viewerMicTrack]));
+    updateViewerMicButton(true);
+    unlockRemoteAudioPlayback();
 }
 
 function closeViewerMic() {
@@ -1426,7 +1535,12 @@ function updateViewerMicButton(open) {
 function setupVAD(stream) {
     stopVAD();
     try {
-        vadContext = new AudioContext();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        vadContext = new AudioCtx();
+        if (vadContext.state === 'suspended') {
+            vadContext.resume().catch(() => { /* user gesture may still be required */ });
+        }
         const source = vadContext.createMediaStreamSource(stream);
         vadAnalyser = vadContext.createAnalyser();
         vadAnalyser.fftSize = 512;
@@ -1721,6 +1835,15 @@ function pickVideoCodec(preferSimulcast) {
     return preferSimulcast ? (vp8 || h264 || vp9 || null) : (vp9 || vp8 || h264 || null);
 }
 
+function canUseDisplayCapture() {
+    return !!navigator.mediaDevices?.getDisplayMedia;
+}
+
+function isLikelyMobileDevice() {
+    const ua = navigator.userAgent || '';
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+}
+
 async function autoPlayVideo() {
     try {
         await remoteVideo.play();
@@ -1747,17 +1870,17 @@ function escapeHtml(str) {
     return d.innerHTML;
 }
 
-function showToast(message, type = 'error') {
+function showToast(message, type = 'error', duration = 3500) {
     toastMessage.textContent = message;
     const colors = {
         error:   'bg-red-500 border-red-600',
         success: 'bg-green-600 border-green-700',
         warning: 'bg-yellow-500 border-yellow-600'
     };
-    toast.className = `fixed bottom-4 right-4 max-w-xs px-5 py-3 rounded-lg shadow-lg text-white border z-50 ${colors[type] || colors.error}`;
+    toast.className = `fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-xs px-5 py-3 rounded-lg shadow-lg text-white border z-50 ${colors[type] || colors.error}`;
     toast.classList.remove('hidden');
     clearTimeout(toast._timeout);
-    toast._timeout = setTimeout(() => toast.classList.add('hidden'), 3500);
+    toast._timeout = setTimeout(() => toast.classList.add('hidden'), duration);
 }
 
 // ==================== LEAVE ====================

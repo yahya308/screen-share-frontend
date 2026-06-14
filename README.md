@@ -42,6 +42,7 @@
 ## 🎯 Features
 
 ### Broadcaster Features
+- **Mobile broadcaster note:** Screen sharing and system audio depend on browser support; mobile viewer mode is the recommended mobile path.
 - ✅ **Flexible Quality Settings**
   - Resolution: 144p - 1080p
   - Frame Rate: 24 - 60 FPS
@@ -53,6 +54,7 @@
 - ✅ **Instant Start/Stop**
 
 ### Viewer Features
+- **Mobile viewer support:** Join, listen, and microphone workflows are the primary supported mobile experience.
 - ✅ **One-Click Join**
 - ✅ **Auto-Quality Adaptation**
 - ✅ **Native HTML5 Video Controls**

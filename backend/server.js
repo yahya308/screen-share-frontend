@@ -460,7 +460,7 @@ io.on('connection', (socket) => {
                 }
 
                 if (sender) {
-                    const { closedProducerIds, hadVideo } = closeProducersOwnedBySocket(roomState, socket.id, workerManager);
+                    const { closedProducerIds, hadVideo } = closeProducersOwnedBySocket(roomState, socket.id, workerManager, transport.id);
                     if (hadVideo) {
                         roomManager.setStreamingStatus(socketData.roomId, false);
                         socket.to(socketData.roomId).emit('stream-paused');
@@ -486,11 +486,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('transport-connect', async ({ transportId, dtlsParameters }) => {
+    socket.on('transport-connect', async ({ transportId, dtlsParameters }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData?.roomState) return;
+        if (!socketData?.roomState) { callback?.({ error: 'Odaya katÄ±lmadÄ±nÄ±z' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
-        if (transport) await transport.connect({ dtlsParameters }).catch(e => console.warn('transport-connect error:', e));
+        if (!transport) { callback?.({ error: 'Transport bulunamadÄ±' }); return; }
+        try {
+            await transport.connect({ dtlsParameters });
+            callback?.({ success: true });
+        } catch (e) {
+            console.warn('transport-connect error:', e);
+            callback?.({ error: e.message });
+        }
     });
 
     socket.on('restartIce', async ({ transportId }, callback) => {
@@ -528,7 +535,7 @@ io.on('connection', (socket) => {
             const producer = await transport.produce({
                 kind,
                 rtpParameters,
-                appData: { ...appData, socketId: socket.id }, // Track owner
+                appData: { ...appData, socketId: socket.id, transportId: transport.id }, // Track owner
                 keyFrameRequestDelay: 500
             });
 
@@ -813,12 +820,13 @@ function findTransport(roomState, transportId) {
     return null;
 }
 
-function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef) {
+function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef, transportId = null) {
     const closedProducerIds = [];
     let hadVideo = false;
 
     for (const [producerId, producer] of [...roomState.producers]) {
         if (producer.appData?.socketId !== socketId) continue;
+        if (transportId && producer.appData?.transportId !== transportId) continue;
         hadVideo = hadVideo || producer.kind === 'video';
         try { producer.close(); } catch (e) { /* yoksay */ }
         if (roomState.producers.delete(producerId)) {
