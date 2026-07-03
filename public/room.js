@@ -58,6 +58,9 @@ let adminMicPublishPromise = null;
 let viewerMicOpenPromise = null;
 const consumerByProducerId = new Map();
 const consumingProducerIds = new Set();
+const MIC_NOISE_SUPPRESSION_STORAGE_KEY = 'velo_mic_noise_suppression';
+let micNoiseSuppressionSupported = true;
+let micNoiseSuppressionEnabled = loadMicNoiseSuppressionPreference();
 
 // Stream timer
 let streamTimerInterval = null;
@@ -93,6 +96,7 @@ const btnStartStream     = document.getElementById('btnStartStream');
 const btnStopStream      = document.getElementById('btnStopStream');
 const btnToggleMic       = document.getElementById('btnToggleMic');
 const btnToggleAudio     = document.getElementById('btnToggleAudio');
+const adminNoiseSuppressionToggle = document.getElementById('adminNoiseSuppressionToggle');
 const btnToggleViewerMic = document.getElementById('btnToggleViewerMic');
 const btnToggleChat      = document.getElementById('btnToggleChat');
 const btnCloseRoom       = document.getElementById('btnCloseRoom');
@@ -104,6 +108,7 @@ const bitrateInput       = document.getElementById('bitrateInput');
 
 // Viewer elements
 const btnViewerMic  = document.getElementById('btnViewerMic');
+const viewerNoiseSuppressionToggle = document.getElementById('viewerNoiseSuppressionToggle');
 const btnLeaveRoom  = document.getElementById('btnLeaveRoom');
 
 // Viewer playback controls
@@ -1251,6 +1256,154 @@ async function republishAdminMicUnlocked() {
     }
 }
 
+
+function loadMicNoiseSuppressionPreference() {
+    try {
+        const saved = localStorage.getItem(MIC_NOISE_SUPPRESSION_STORAGE_KEY);
+        return saved === null ? true : saved === 'true';
+    } catch (e) {
+        return true;
+    }
+}
+
+function saveMicNoiseSuppressionPreference() {
+    try { localStorage.setItem(MIC_NOISE_SUPPRESSION_STORAGE_KEY, String(micNoiseSuppressionEnabled)); } catch (e) { /* yoksay */ }
+}
+
+function detectMicNoiseSuppressionSupport() {
+    const supported = navigator.mediaDevices?.getSupportedConstraints?.();
+    return !supported || supported.noiseSuppression === true;
+}
+
+function buildMicCaptureConstraints() {
+    const audio = {
+        echoCancellation: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        channelCount: 1
+    };
+    if (micNoiseSuppressionSupported) audio.noiseSuppression = micNoiseSuppressionEnabled;
+    return { audio };
+}
+
+function buildMicLiveConstraints() {
+    const constraints = {
+        echoCancellation: true,
+        autoGainControl: true
+    };
+    if (micNoiseSuppressionSupported) constraints.noiseSuppression = micNoiseSuppressionEnabled;
+    return constraints;
+}
+
+function syncMicNoiseSuppressionToggles() {
+    const toggles = [adminNoiseSuppressionToggle, viewerNoiseSuppressionToggle].filter(Boolean);
+    toggles.forEach((toggle) => {
+        toggle.checked = micNoiseSuppressionSupported && micNoiseSuppressionEnabled;
+        toggle.disabled = !micNoiseSuppressionSupported;
+        const label = toggle.closest('label');
+        if (label) {
+            label.classList.toggle('opacity-50', !micNoiseSuppressionSupported);
+            label.classList.toggle('cursor-not-allowed', !micNoiseSuppressionSupported);
+            label.title = micNoiseSuppressionSupported ? '' : 'Bu taray\u0131c\u0131 mikrofon g\u00fcr\u00fclt\u00fc engellemeyi desteklemiyor';
+        }
+    });
+}
+
+function initMicNoiseSuppressionControls() {
+    micNoiseSuppressionSupported = detectMicNoiseSuppressionSupport();
+    syncMicNoiseSuppressionToggles();
+
+    [adminNoiseSuppressionToggle, viewerNoiseSuppressionToggle].filter(Boolean).forEach((toggle) => {
+        toggle.addEventListener('change', () => {
+            void setMicNoiseSuppressionEnabled(toggle.checked);
+        });
+    });
+}
+
+async function setMicNoiseSuppressionEnabled(enabled) {
+    if (!micNoiseSuppressionSupported) {
+        syncMicNoiseSuppressionToggles();
+        showToast('Bu taray\u0131c\u0131 mikrofon g\u00fcr\u00fclt\u00fc engellemeyi desteklemiyor', 'warning');
+        return;
+    }
+
+    const previousValue = micNoiseSuppressionEnabled;
+    micNoiseSuppressionEnabled = !!enabled;
+    saveMicNoiseSuppressionPreference();
+    syncMicNoiseSuppressionToggles();
+
+    try {
+        await applyMicNoiseSuppressionToLiveMic();
+    } catch (err) {
+        micNoiseSuppressionEnabled = previousValue;
+        saveMicNoiseSuppressionPreference();
+        console.warn('Mikrofon g\u00fcr\u00fclt\u00fc engelleme g\u00fcncellenemedi:', err);
+        showToast('G\u00fcr\u00fclt\u00fc engelleme de\u011fi\u015ftirilemedi');
+        syncMicNoiseSuppressionToggles();
+    }
+}
+
+function getActiveLocalMicContext() {
+    if (micTrack?.readyState === 'live') {
+        return { role: 'admin', track: micTrack, producer: micProducer };
+    }
+    if (viewerMicTrack?.readyState === 'live') {
+        return { role: 'viewer', track: viewerMicTrack, producer: viewerMicProducer };
+    }
+    return null;
+}
+
+async function applyMicNoiseSuppressionToLiveMic() {
+    const context = getActiveLocalMicContext();
+    if (!context) return;
+
+    try {
+        await context.track.applyConstraints(buildMicLiveConstraints());
+        setupVAD(new MediaStream([context.track]));
+        logMicNoiseSuppressionSettings(context.role, context.track);
+        showToast(micNoiseSuppressionEnabled ? 'G\u00fcr\u00fclt\u00fc engelleme a\u00e7\u0131ld\u0131' : 'G\u00fcr\u00fclt\u00fc engelleme kapat\u0131ld\u0131', 'success');
+    } catch (err) {
+        console.warn('applyConstraints ba\u015far\u0131s\u0131z, mikrofon track de\u011fi\u015ftiriliyor:', err);
+        await replaceLiveMicTrack(context);
+    }
+}
+
+async function replaceLiveMicTrack(context) {
+    const stream = await navigator.mediaDevices.getUserMedia(buildMicCaptureConstraints());
+    const newTrack = stream.getAudioTracks()[0];
+    if (!newTrack) throw new Error('Yeni mikrofon track al\u0131namad\u0131');
+
+    try {
+        if (context.producer && !context.producer.closed) {
+            await context.producer.replaceTrack({ track: newTrack });
+        }
+
+        const oldTrack = context.role === 'admin' ? micTrack : viewerMicTrack;
+        if (context.role === 'admin') {
+            micTrack = newTrack;
+            updateAdminMicButton(true);
+        } else {
+            viewerMicTrack = newTrack;
+            viewerMicTrack.onended = () => closeViewerMic();
+            updateViewerMicButton(true);
+        }
+        if (oldTrack && oldTrack !== newTrack) oldTrack.stop();
+
+        setupVAD(stream);
+        logMicNoiseSuppressionSettings(context.role, newTrack);
+        showToast(micNoiseSuppressionEnabled ? 'G\u00fcr\u00fclt\u00fc engelleme a\u00e7\u0131ld\u0131' : 'G\u00fcr\u00fclt\u00fc engelleme kapat\u0131ld\u0131', 'success');
+    } catch (err) {
+        newTrack.stop();
+        throw err;
+    }
+}
+
+function logMicNoiseSuppressionSettings(role, track) {
+    const settings = track?.getSettings?.() || {};
+    const actual = Object.prototype.hasOwnProperty.call(settings, 'noiseSuppression') ? settings.noiseSuppression : 'unknown';
+    console.info('[mic:' + role + '] noiseSuppression requested=' + micNoiseSuppressionEnabled + ', actual=' + actual);
+}
+
 // Admin's own mic toggle
 btnToggleMic.addEventListener('click', async () => {
     if (micTrack) {
@@ -1273,16 +1426,9 @@ btnToggleMic.addEventListener('click', async () => {
             if (!navigator.mediaDevices?.getUserMedia) {
                 throw new Error('Bu tarayici mikrofon erisimini desteklemiyor');
             }
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,    // A4: explicit AGC
-                    sampleRate: 48000,
-                    channelCount: 1
-                }
-            });
+            const stream = await navigator.mediaDevices.getUserMedia(buildMicCaptureConstraints());
             micTrack = stream.getAudioTracks()[0];
+            logMicNoiseSuppressionSettings('admin', micTrack);
             unlockRemoteAudioPlayback();
             updateAdminMicButton(true);
             // Producer'ı oluştur (transport varsa). Yoksa startStream sonunda
@@ -1465,16 +1611,9 @@ async function openViewerMicUnlocked() {
         if (!navigator.mediaDevices?.getUserMedia) {
             throw new Error('Bu tarayici mikrofon erisimini desteklemiyor');
         }
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,    // A4: explicit AGC
-                sampleRate: 48000,
-                channelCount: 1
-            }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(buildMicCaptureConstraints());
         viewerMicTrack = stream.getAudioTracks()[0];
+        logMicNoiseSuppressionSettings('viewer', viewerMicTrack);
         unlockRemoteAudioPlayback();
 
         // Ensure we have a healthy mediasoup state
@@ -1968,6 +2107,7 @@ btnConfirmLeave?.addEventListener('click', () => {
         }
     } catch (e) { /* yoksay */ }
 
+    initMicNoiseSuppressionControls();
     const nickname = await showNicknameModal();
     await initSocket(nickname);
 })();
