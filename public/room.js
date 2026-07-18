@@ -39,6 +39,17 @@ let audioMutedState  = false;
 // Autoplay politikası yüzünden bekleyen (henüz çalamayan) audio elementleri (B2a)
 const pendingAudioElements = new Set();
 
+// Mobile browsers switch to a communication/VoIP audio route while capturing.
+// Keep remote playout in one graph so that route attenuation can be compensated
+// without changing desktop playback or creating a second audible output.
+const MOBILE_DUPLEX_OUTPUT_GAIN = 1.58; // approximately +4 dB
+const remoteAudioSources = new Map(); // consumerId -> { source, stream }
+let remoteAudioContext = null;
+let remoteAudioMasterGain = null;
+let remoteAudioLimiter = null;
+let mobileDuplexAudioActive = false;
+let mobileAudioSessionReassertTimer = null;
+
 let isAdmin          = false;
 let mySocketId       = '';
 let adminSocketId    = null;   // U1: yayın sahibi konuşunca video kenarını vurgula
@@ -342,7 +353,7 @@ function registerSocketEvents() {
         viewerMicEnabled = enabled;
         if (!isAdmin) {
             updateViewerMicButton();
-            if (!enabled && viewerMicProducer) {
+            if (!enabled && (viewerMicProducer || viewerMicTrack)) {
                 // Admin disabled viewer mic — stop ours
                 closeViewerMic();
                 showToast('Mikrofon özelliği oda sahibi tarafından kapatıldı');
@@ -920,6 +931,7 @@ async function consumeProducer(producerId, meta = null) {
                 audioEl.srcObject = new MediaStream([consumer.track]);
                 document.body.appendChild(audioEl);
                 consumer.appData = { ...(consumer.appData || {}), audioEl, source: meta?.source || null };
+                if (mobileDuplexAudioActive) await attachConsumerToMobileAudio(consumer);
                 // Hemen play() dene — autoplay reddedilirse playAudioElement() handle eder
                 playAudioElement(audioEl);
                 unlockRemoteAudioPlayback();
@@ -965,7 +977,8 @@ function playAudioElement(audioEl) {
 function resumePendingAudio() {
     if (!pendingAudioElements.size) return;
     pendingAudioElements.forEach((audioEl) => {
-        audioEl.muted = audioMutedState; // kullanıcının tercih ettiği mute durumuna dön
+        const isDuplexRouted = audioEl.dataset.mobileDuplexRouted === 'true';
+        audioEl.muted = isDuplexRouted || audioMutedState;
         if (!audioMutedState) {
             audioEl.play().then(() => {
                 pendingAudioElements.delete(audioEl);
@@ -978,6 +991,7 @@ function resumePendingAudio() {
 
 // İlk etkileşimde (click/touch/keydown) bekleyen sesleri aç
 function unlockRemoteAudioPlayback() {
+    resumeMobileRemoteAudioOutput();
     syncAllAudioElements();
     resumePendingAudio();
     if (remoteVideo?.srcObject && remoteVideo.paused) {
@@ -989,6 +1003,14 @@ function setupAudioGestureUnlock() {
     const unlock = () => unlockRemoteAudioPlayback();
     ['click', 'touchstart', 'pointerdown', 'keydown'].forEach(evt =>
         document.addEventListener(evt, unlock, { once: false, passive: true }));
+
+    const recoverMobileDuplexAudio = () => {
+        if (!mobileDuplexAudioActive || document.visibilityState === 'hidden') return;
+        void activateMobileDuplexAudioSession();
+    };
+    document.addEventListener('visibilitychange', recoverMobileDuplexAudio);
+    window.addEventListener('pageshow', recoverMobileDuplexAudio);
+    navigator.mediaDevices?.addEventListener?.('devicechange', recoverMobileDuplexAudio);
 }
 setupAudioGestureUnlock();
 
@@ -1006,6 +1028,7 @@ function closeAndRemoveConsumer(consumer) {
     if (videoConsumer === consumer) videoConsumer = null;
 
     if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
+        detachConsumerFromMobileAudio(consumer);
         const el = consumer.appData.audioEl;
         pendingAudioElements.delete(el);
         try { el.pause(); } catch (e) { /* yoksay */ }
@@ -1035,16 +1058,202 @@ function attachConsumerCleanup(consumer) {
  * senkronize et. (B4 düzeltmesi)
  */
 function syncAllAudioElements() {
+    const volume = getSelectedPlaybackVolume();
+    updateMobileRemoteAudioGain(volume);
+
     for (const [, consumer] of consumers) {
         if (consumer.kind === 'audio' && consumer.appData?.audioEl) {
-            consumer.appData.audioEl.muted = audioMutedState;
-            if (volumeSlider) consumer.appData.audioEl.volume = parseFloat(volumeSlider.value);
+            const isDuplexRouted = remoteAudioSources.has(consumer.id);
+            consumer.appData.audioEl.dataset.mobileDuplexRouted = String(isDuplexRouted);
+            consumer.appData.audioEl.muted = isDuplexRouted || audioMutedState;
+            consumer.appData.audioEl.volume = volume;
             // Eğer daha önce autoplay yüzünden beklemedeyse ve artık çalması gerekiyorsa
             if (!audioMutedState && consumer.appData.audioEl.paused) {
                 playAudioElement(consumer.appData.audioEl);
             }
         }
     }
+}
+
+function getSelectedPlaybackVolume() {
+    const value = volumeSlider ? parseFloat(volumeSlider.value) : 1;
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+}
+
+function setPageAudioSessionType(type) {
+    const audioSession = navigator.audioSession;
+    if (!audioSession || !('type' in audioSession)) return;
+    try {
+        audioSession.type = type;
+        console.info('[mobile-audio] navigator.audioSession.type=' + type);
+    } catch (err) {
+        console.debug('[mobile-audio] audio session type could not be changed:', err);
+    }
+}
+
+function clearClosedRemoteAudioGraph() {
+    if (remoteAudioContext?.state !== 'closed') return;
+    remoteAudioSources.clear();
+    remoteAudioContext = null;
+    remoteAudioMasterGain = null;
+    remoteAudioLimiter = null;
+}
+
+async function ensureMobileRemoteAudioGraph() {
+    clearClosedRemoteAudioGraph();
+    if (remoteAudioContext && remoteAudioMasterGain && remoteAudioLimiter) {
+        if (remoteAudioContext.state === 'suspended') {
+            try { await remoteAudioContext.resume(); } catch (e) { /* user gesture may still be required */ }
+        }
+        return remoteAudioContext;
+    }
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    try {
+        try {
+            remoteAudioContext = new AudioCtx({ latencyHint: 'interactive' });
+        } catch (e) {
+            remoteAudioContext = new AudioCtx();
+        }
+
+        remoteAudioMasterGain = remoteAudioContext.createGain();
+        remoteAudioLimiter = remoteAudioContext.createDynamicsCompressor();
+        remoteAudioLimiter.threshold.value = -3;
+        remoteAudioLimiter.knee.value = 6;
+        remoteAudioLimiter.ratio.value = 12;
+        remoteAudioLimiter.attack.value = 0.003;
+        remoteAudioLimiter.release.value = 0.25;
+        remoteAudioMasterGain.connect(remoteAudioLimiter);
+        remoteAudioLimiter.connect(remoteAudioContext.destination);
+        updateMobileRemoteAudioGain();
+
+        if (remoteAudioContext.state === 'suspended') {
+            try { await remoteAudioContext.resume(); } catch (e) { /* user gesture may still be required */ }
+        }
+        return remoteAudioContext;
+    } catch (err) {
+        console.warn('[mobile-audio] Web Audio output could not be created; element playback remains active:', err);
+        remoteAudioContext = null;
+        remoteAudioMasterGain = null;
+        remoteAudioLimiter = null;
+        return null;
+    }
+}
+
+function updateMobileRemoteAudioGain(volume = getSelectedPlaybackVolume()) {
+    if (!remoteAudioContext || !remoteAudioMasterGain) return;
+    const target = audioMutedState ? 0 : volume * (mobileDuplexAudioActive ? MOBILE_DUPLEX_OUTPUT_GAIN : 1);
+    const now = remoteAudioContext.currentTime;
+    try {
+        remoteAudioMasterGain.gain.cancelScheduledValues(now);
+        remoteAudioMasterGain.gain.setTargetAtTime(target, now, 0.015);
+    } catch (e) {
+        remoteAudioMasterGain.gain.value = target;
+    }
+}
+
+async function attachConsumerToMobileAudio(consumer) {
+    if (!mobileDuplexAudioActive || consumer?.kind !== 'audio' || !consumer.track) return false;
+    if (remoteAudioSources.has(consumer.id)) return true;
+
+    const context = await ensureMobileRemoteAudioGraph();
+    if (!context || !mobileDuplexAudioActive || !consumers.has(consumer.id) || consumer.track.readyState === 'ended') return false;
+    // Recovery events can overlap; another call may have attached it while we awaited resume().
+    if (remoteAudioSources.has(consumer.id)) return true;
+
+    try {
+        const stream = new MediaStream([consumer.track]);
+        const source = context.createMediaStreamSource(stream);
+        source.connect(remoteAudioMasterGain);
+        remoteAudioSources.set(consumer.id, { source, stream });
+        if (consumer.appData?.audioEl) {
+            consumer.appData.audioEl.dataset.mobileDuplexRouted = 'true';
+            consumer.appData.audioEl.muted = true;
+        }
+        return true;
+    } catch (err) {
+        console.warn('[mobile-audio] Consumer could not be routed through Web Audio:', err);
+        return false;
+    }
+}
+
+function detachConsumerFromMobileAudio(consumer) {
+    if (!consumer) return;
+    const routed = remoteAudioSources.get(consumer.id);
+    if (routed) {
+        try { routed.source.disconnect(); } catch (e) { /* already disconnected */ }
+        remoteAudioSources.delete(consumer.id);
+    }
+    if (consumer.appData?.audioEl) {
+        consumer.appData.audioEl.dataset.mobileDuplexRouted = 'false';
+    }
+}
+
+async function enableMobileRemoteAudioRouting() {
+    const context = await ensureMobileRemoteAudioGraph();
+    if (!context || !mobileDuplexAudioActive) {
+        syncAllAudioElements();
+        return;
+    }
+    const audioConsumers = [...consumers.values()].filter(consumer => consumer.kind === 'audio');
+    await Promise.all(audioConsumers.map(consumer => attachConsumerToMobileAudio(consumer)));
+    syncAllAudioElements();
+}
+
+function disableMobileRemoteAudioRouting() {
+    for (const consumer of consumers.values()) {
+        if (consumer.kind === 'audio') detachConsumerFromMobileAudio(consumer);
+    }
+    updateMobileRemoteAudioGain();
+    syncAllAudioElements();
+    if (remoteAudioContext?.state === 'running') {
+        remoteAudioContext.suspend().catch(() => { /* best effort */ });
+    }
+}
+
+function resumeMobileRemoteAudioOutput() {
+    if (!mobileDuplexAudioActive || remoteAudioContext?.state !== 'suspended') return;
+    remoteAudioContext.resume().then(() => updateMobileRemoteAudioGain()).catch(() => { /* user gesture may still be required */ });
+}
+
+async function prepareMobileDuplexAudioSession() {
+    if (!isLikelyMobileDevice()) return;
+    if (mobileAudioSessionReassertTimer) clearTimeout(mobileAudioSessionReassertTimer);
+    // WebKit route reset: release a stale capture route before requesting the mic.
+    setPageAudioSessionType('auto');
+    await ensureMobileRemoteAudioGraph();
+}
+
+async function activateMobileDuplexAudioSession() {
+    if (!isLikelyMobileDevice()) return;
+    mobileDuplexAudioActive = true;
+    setPageAudioSessionType('play-and-record');
+    await enableMobileRemoteAudioRouting();
+    resumeMobileRemoteAudioOutput();
+
+    if (mobileAudioSessionReassertTimer) clearTimeout(mobileAudioSessionReassertTimer);
+    mobileAudioSessionReassertTimer = setTimeout(() => {
+        if (!mobileDuplexAudioActive) return;
+        setPageAudioSessionType('play-and-record');
+        resumeMobileRemoteAudioOutput();
+        syncAllAudioElements();
+    }, 250);
+}
+
+function deactivateMobileDuplexAudioSession() {
+    if (!isLikelyMobileDevice()) return;
+    mobileDuplexAudioActive = false;
+    if (mobileAudioSessionReassertTimer) {
+        clearTimeout(mobileAudioSessionReassertTimer);
+        mobileAudioSessionReassertTimer = null;
+    }
+    disableMobileRemoteAudioRouting();
+    // WebKit needs playback -> auto to leave the capture/receiver route reliably.
+    setPageAudioSessionType('playback');
+    setPageAudioSessionType('auto');
+    setTimeout(() => unlockRemoteAudioPlayback(), 0);
 }
 
 // ==================== ADMIN: STREAM CONTROLS ====================
@@ -1386,6 +1595,7 @@ async function replaceLiveMicTrack(context) {
             viewerMicTrack = newTrack;
             viewerMicTrack.onended = () => closeViewerMic();
             updateViewerMicButton(true);
+            await activateMobileDuplexAudioSession();
         }
         if (oldTrack && oldTrack !== newTrack) oldTrack.stop();
 
@@ -1589,7 +1799,7 @@ btnViewerMic.addEventListener('click', async () => {
         return;
     }
 
-    if (viewerMicProducer) {
+    if (viewerMicProducer || viewerMicTrack?.readyState === 'live') {
         closeViewerMic();
     } else {
         await openViewerMic();
@@ -1611,8 +1821,11 @@ async function openViewerMicUnlocked() {
         if (!navigator.mediaDevices?.getUserMedia) {
             throw new Error('Bu tarayici mikrofon erisimini desteklemiyor');
         }
+        await prepareMobileDuplexAudioSession();
         const stream = await navigator.mediaDevices.getUserMedia(buildMicCaptureConstraints());
         viewerMicTrack = stream.getAudioTracks()[0];
+        if (!viewerMicTrack) throw new Error('Mikrofon ses izi alınamadı');
+        await activateMobileDuplexAudioSession();
         logMicNoiseSuppressionSettings('viewer', viewerMicTrack);
         unlockRemoteAudioPlayback();
 
@@ -1655,6 +1868,7 @@ async function openViewerMicUnlocked() {
         console.error('Viewer mic error:', err);
         if (viewerMicProducer) { try { viewerMicProducer.close(); } catch (e) { /* yoksay */ } viewerMicProducer = null; }
         if (viewerMicTrack) { try { viewerMicTrack.stop(); } catch (e) { /* yoksay */ } viewerMicTrack = null; }
+        deactivateMobileDuplexAudioSession();
         updateViewerMicButton(false);
         showToast('Mikrofon açılamadı: ' + (err.message || 'İzin reddedildi'));
     }
@@ -1663,6 +1877,7 @@ async function openViewerMicUnlocked() {
 async function republishViewerMic() {
     if (!viewerMicEnabled || !viewerMicTrack || viewerMicTrack.readyState !== 'live' || viewerMicProducer) return;
 
+    await activateMobileDuplexAudioSession();
     await initMediasoup();
     if (!consumerTransport || consumerTransport.closed) await createRecvTransportAsync();
     if (!viewerSendTransport || viewerSendTransport.closed) await createViewerSendTransportAsync();
@@ -1700,6 +1915,7 @@ function closeViewerMic() {
         viewerSendTransport = null;
     }
     if (viewerMicTrack) { viewerMicTrack.stop(); viewerMicTrack = null; }
+    deactivateMobileDuplexAudioSession();
     socket.emit('voice-activity', { speaking: false });
     updateViewerMicButton(false);
 }
@@ -2033,7 +2249,9 @@ function canUseDisplayCapture() {
 
 function isLikelyMobileDevice() {
     const ua = navigator.userAgent || '';
-    return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+    return navigator.userAgentData?.mobile === true ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+        (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
 }
 
 async function autoPlayVideo() {
@@ -2088,7 +2306,7 @@ btnCancelLeave?.addEventListener('click', () => {
 });
 
 btnConfirmLeave?.addEventListener('click', () => {
-    if (viewerMicProducer) closeViewerMic();
+    if (viewerMicProducer || viewerMicTrack) closeViewerMic();
     window.location.href = 'index.html';
 });
 
