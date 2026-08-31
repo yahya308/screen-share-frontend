@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
@@ -14,6 +15,7 @@ const WorkerManager = require('./WorkerManager');
 const RoomManager = require('./RoomManager');
 const database = require('./database');
 const rateLimiter = require('./RateLimiter');
+const { getClientIp } = require('./clientIp');
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -25,8 +27,17 @@ const corsOptions = allowedOrigins.length
     : { origin: '*', methods: ['GET', 'POST'] };
 
 const app = express();
+// Nginx ters vekilinin arkasındayız: tek hop güvenilir.
+app.set('trust proxy', 1);
 app.use(cors(corsOptions));
-app.use(express.static('../public'));
+
+// Yerel geliştirmede ön yüzü aynı origin'den sunmak kullanışlı. Yol artık
+// çalışma dizinine değil dosyanın konumuna göreli; üretim imajında bu dizin
+// bulunmadığı için sessizce atlanır (ön yüz Vercel'de).
+const publicDir = path.join(__dirname, '..', 'public');
+if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir));
+}
 
 // ==================== SERVER SETUP ====================
 
@@ -76,8 +87,9 @@ function sanitizeChatMessage(msg) {
 // ==================== SOCKET HANDLERS ====================
 
 io.on('connection', (socket) => {
-    const clientIp = socket.handshake.headers['x-forwarded-for']?.split(',')[0]?.trim()
-        || socket.handshake.address;
+    // X-Real-IP → XFF'in SON ögesi → soket adresi. İstemcinin gönderdiği
+    // X-Forwarded-For'un ilk ögesi asla güvenilmez (bkz. clientIp.js).
+    const clientIp = getClientIp(socket.handshake);
 
     console.log(`Client connected: ${socket.id} ip=${clientIp}`);
 
