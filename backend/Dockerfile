@@ -1,35 +1,42 @@
 # Mediasoup Backend Dockerfile
-# Uses Node 20 with Debian Bullseye for native compilation support
+#
+# Çok aşamalı: derleme araçları (python3, build-essential) yalnızca ilk
+# aşamada kalır, son imaj yaklaşık yarı boyutta olur.
+#
+# Eskiden `npm install --only=production` kullanılıyordu: bayrak Node 16'dan
+# beri kullanımdan kalktı ve package-lock.json'u yok sayabiliyordu, yani her
+# derleme farklı sürümler kurabiliyordu. `npm ci` kilidi birebir uygular.
 
-FROM node:20-bullseye
+# ─────────────── Aşama 1: bağımlılıklar ───────────────
+FROM node:20-bullseye AS deps
 
-# Install build dependencies required for mediasoup
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    python3-pip \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
-# Copy package files first (for better layer caching)
-COPY package*.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-# Install dependencies
-RUN npm install --only=production
+# ─────────────── Aşama 2: çalışma imajı ───────────────
+FROM node:20-bullseye-slim
 
-# Copy application source
-COPY . .
+WORKDIR /app
 
-# Expose ports
-# 3000: HTTP/WebSocket server
-# 40000-49999: WebRTC UDP ports (handled by docker-compose)
+COPY --from=deps /app/node_modules ./node_modules
+COPY --chown=node:node . .
+
+# Ayrıcalıksız kullanıcı: süreç artık root değil.
+USER node
+
+# 3000: HTTP/WebSocket
+# 40000-49999: WebRTC UDP/TCP (docker-compose host ağı ile yönetiliyor)
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-# Start the server
+# SIGTERM doğrudan node'a ulaşsın ki düzgün kapanma çalışsın (exec form).
 CMD ["node", "server.js"]

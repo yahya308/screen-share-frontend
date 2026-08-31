@@ -4,15 +4,22 @@
   "description": "VELOSTREAM - High-Performance Screen Sharing Platform Frontend",
   "private": true,
   "scripts": {
-    "build": "echo 'Static HTML frontend build successfully completed'",
+    "build": "npm run build:css && npm run build:vendor",
     "start": "npx serve public",
     "dev": "npx serve public",
     "lint": "eslint . --ext .js",
-    "lint:fix": "eslint . --ext .js --fix"
+    "lint:fix": "eslint . --ext .js --fix",
+    "build:css": "tailwindcss -c tailwind.config.js -i src/tailwind.css -o public/styles.css --minify",
+    "build:vendor": "node scripts/build-vendor.js",
+    "test": "npm --prefix backend test"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
     "eslint": "^8.57.0",
-    "serve": "^14.2.1"
+    "mediasoup-client": "^3.18.1",
+    "serve": "^14.2.1",
+    "socket.io-client": "^4.8.3",
+    "tailwindcss": "^3.4.19"
   },
   "keywords": [
     "webrtc",

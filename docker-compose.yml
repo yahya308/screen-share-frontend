@@ -7,6 +7,9 @@ services:
     container_name: mediasoup-backend
     restart: unless-stopped
     network_mode: host
+    # Düzgün kapanma için süre tanı: sunucu istemcilere haber verip
+    # mediasoup worker'larını sırayla kapatıyor (varsayılan 10 sn yetmiyor).
+    stop_grace_period: 20s
     environment:
       - NODE_ENV=production
       - ALLOWED_ORIGINS=https://velostream.com.tr,https://www.velostream.com.tr,https://screen-share-frontend.vercel.app

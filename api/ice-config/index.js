@@ -1,5 +1,13 @@
 const crypto = require('crypto');
 
+// Uç nokta kimlik doğrulaması istemiyor (istemci ICE'i kurmadan önce çağırıyor),
+// bu yüzden kimlik bilgileri KISA ÖMÜRLÜ ve İZLENEBİLİR olmalı: 1 saatlik sabit
+// "timestamp:user" kimliği, uç noktayı bulan herkese bir saatlik ücretsiz relay
+// veriyordu. Artık varsayılan 15 dakika ve her istek ayrı bir rastgele kimlik
+// alıyor — coturn günlüklerinde kötüye kullanım tek bir oturuma bağlanabiliyor.
+const DEFAULT_TTL_SECONDS = 900;
+const MAX_TTL_SECONDS = 3600;
+
 module.exports = (req, res) => {
   try {
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -72,8 +80,13 @@ module.exports = (req, res) => {
 
     if (turnHost) {
       if (turnSecret) {
-        const ttlSeconds = parseInt(process.env.TURN_TTL_SECONDS || '3600', 10);
-        const username = `${Math.floor(Date.now() / 1000) + ttlSeconds}:user`;
+        const requested = parseInt(process.env.TURN_TTL_SECONDS || String(DEFAULT_TTL_SECONDS), 10);
+        const ttlSeconds = Math.min(
+          MAX_TTL_SECONDS,
+          Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_TTL_SECONDS
+        );
+        const sessionId = crypto.randomBytes(6).toString('hex');
+        const username = `${Math.floor(Date.now() / 1000) + ttlSeconds}:${sessionId}`;
         const hmac = crypto.createHmac('sha1', turnSecret).update(username).digest('base64');
         pushTurnServers(username, hmac);
       } else if (turnUsername && turnPassword) {
@@ -81,6 +94,8 @@ module.exports = (req, res) => {
       }
     }
 
+    // Kimlik bilgileri kısa ömürlü: ara katmanlar önbelleklemesin.
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ iceServers, iceCandidatePoolSize: 10 });
   } catch (e) {
     console.error('Error building ICE config:', e);

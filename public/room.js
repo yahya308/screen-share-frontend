@@ -582,11 +582,11 @@ function renderUserList(users) {
             </div>
             ${isAdmin && !isOwner && !isMe ? `
                 <div class="flex gap-1 flex-shrink-0">
-                    <button onclick="kickUser('${escapeHtml(user.socketId)}')" title="Odadan At"
+                    <button type="button" data-action="kick" title="Odadan At"
                         class="p-1.5 text-orange-400 hover:bg-orange-500/20 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
                         </button>
-                    <button onclick="banUser('${escapeHtml(user.socketId)}')" title="Banla"
+                    <button type="button" data-action="ban" title="Banla"
                         class="p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
                         </button>
@@ -611,24 +611,37 @@ function updateSpeakingIndicator(socketId, speaking) {
     }
 }
 
-// Kick / Ban (called from HTML onclick)
-window.kickUser = function(targetSocketId) {
+// Moderasyon: satır içi onclick yerine tek bir delege dinleyici.
+// Böylece işaretlemeye hiç kullanıcı verisi gömülmüyor (escapeHtml tırnak
+// kaçırmıyordu) ve sayfa 'unsafe-inline' olmadan katı bir CSP altında çalışıyor.
+userListContainer.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+
+    const socketId = button.closest('[data-socket-id]')?.dataset.socketId;
+    if (!socketId) return;
+
+    if (button.dataset.action === 'kick') kickUser(socketId);
+    else if (button.dataset.action === 'ban') banUser(socketId);
+});
+
+function kickUser(targetSocketId) {
     if (!isAdmin) return;
     if (!confirm('Bu kullanıcıyı odadan atmak istiyor musunuz? (Tekrar girebilir)')) return;
     socket.emit('kick-user', { targetSocketId }, (result) => {
         if (result?.error) showToast(result.error);
         else showToast('Kullanıcı odadan atıldı', 'success');
     });
-};
+}
 
-window.banUser = function(targetSocketId) {
+function banUser(targetSocketId) {
     if (!isAdmin) return;
     if (!confirm('Bu kullanıcıyı BAN\'lamak istiyor musunuz? (Bu sunucu oturumunda odaya giremez)')) return;
     socket.emit('ban-user', { targetSocketId }, (result) => {
         if (result?.error) showToast(result.error);
         else showToast('Kullanıcı banlandı', 'success');
     });
-};
+}
 
 // ==================== MEDIASOUP ====================
 

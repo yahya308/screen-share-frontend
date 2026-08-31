@@ -1,0 +1,7 @@
+# Üçüncü taraf derlemeleri ve üretilen dosyalar
+node_modules/
+public/vendor/
+public/styles.css
+coverage/
+dist/
+build/
