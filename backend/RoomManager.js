@@ -63,11 +63,29 @@ class RoomManager {
         // roomId -> Set<ip>  (RAM-based ban list)
         this.bannedIps = new Map();
 
-        // roomId -> Map<socketId, { nickname, speaking }>
+        // roomId -> Map<socketId, { nickname, role, speaking }>
+        // Oda üyeliğinin TEK doğruluk kaynağı: sayım ve kullanıcı listesi
+        // artık tüm soket haritasını taramak yerine buradan O(1)/O(oda) okunur.
         this.roomUsers = new Map();
 
         // socketId -> { count, resetAt }
         this.chatRateLimits = new Map();
+    }
+
+    // ==================== ÜYELİK ====================
+
+    /** Bir soketi odanın üye haritasına ekle (varsa günceller). */
+    addMember(roomId, socketId, role) {
+        if (!this.roomUsers.has(roomId)) this.roomUsers.set(roomId, new Map());
+        const userMap = this.roomUsers.get(roomId);
+        const existing = userMap.get(socketId);
+        if (existing) existing.role = role;
+        else userMap.set(socketId, { nickname: '', role, speaking: false });
+        return userMap;
+    }
+
+    removeMember(roomId, socketId) {
+        this.roomUsers.get(roomId)?.delete(socketId);
     }
 
     // ==================== NICKNAME ====================
@@ -105,7 +123,7 @@ class RoomManager {
         if (userMap.has(socketId)) {
             userMap.get(socketId).nickname = clean;
         } else {
-            userMap.set(socketId, { nickname: clean, speaking: false });
+            userMap.set(socketId, { nickname: clean, role: socketData.role, speaking: false });
         }
         socketData.nickname = clean;
         return { success: true };
@@ -121,13 +139,13 @@ class RoomManager {
         const userMap = this.roomUsers.get(roomId) || new Map();
         const list = [];
 
-        for (const [socketId, data] of this.socketRooms) {
-            if (data.roomId !== roomId) continue;
-            const ud = userMap.get(socketId) || {};
+        // O(oda büyüklüğü). Eskiden sunucudaki TÜM soketler geziliyordu ve bu
+        // her katılım/ayrılışta tekrarlanıyordu.
+        for (const [socketId, ud] of userMap) {
             list.push({
                 socketId,
-                nickname: ud.nickname || data.nickname || 'Anonim',
-                role: data.role,
+                nickname: ud.nickname || 'Anonim',
+                role: ud.role,
                 speaking: ud.speaking || false
             });
         }
@@ -239,6 +257,9 @@ class RoomManager {
             producers: new Map(),
             consumers: new Map(),
             transports: new Map(),
+            // transport.id -> transport. findTransport her medya olayında
+            // (connect/produce/consume/restartIce) tüm koleksiyonu geziyordu.
+            transportsById: new Map(),
             pipeTransports: new Map(),
             pipeProducers: new Map(),
             isStreaming: false,
@@ -249,8 +270,9 @@ class RoomManager {
             chatEnabled: true          // Is chat open?
         });
 
-        this.socketRooms.set(adminSocketId, { roomId, role: 'admin', nickname: '', ip: '' });
+        this.socketRooms.set(adminSocketId, { roomId, role: 'admin', nickname: '', ip: creatorIp });
         this.roomUsers.set(roomId, new Map());
+        this.addMember(roomId, adminSocketId, 'admin');
 
         console.log(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
         return { roomId, workerIndex, isPublic: !password, adminToken };
@@ -283,8 +305,10 @@ class RoomManager {
      * @returns {string|null} socketId
      */
     getConnectedAdminSocketId(roomId) {
-        for (const [socketId, data] of this.socketRooms) {
-            if (data.roomId === roomId && data.role === 'admin') return socketId;
+        const userMap = this.roomUsers.get(roomId);
+        if (!userMap) return null;
+        for (const [socketId, data] of userMap) {
+            if (data.role === 'admin') return socketId;
         }
         return null;
     }
@@ -334,8 +358,7 @@ class RoomManager {
         if (currentUsers >= room.max_users) return { error: 'Oda dolu' };
 
         this.socketRooms.set(socketId, { roomId, role: 'viewer', nickname: '', ip: clientIp });
-
-        if (!this.roomUsers.has(roomId)) this.roomUsers.set(roomId, new Map());
+        this.addMember(roomId, socketId, 'viewer');
 
         const newUserCount = this.getRoomUserCount(roomId);
         console.log(`👤 User ${socketId} joined room ${roomId} (total: ${newUserCount})`);
@@ -361,8 +384,7 @@ class RoomManager {
         this.socketRooms.delete(socketId);
 
         // Remove from user map
-        const userMap = this.roomUsers.get(roomId);
-        if (userMap) userMap.delete(socketId);
+        this.removeMember(roomId, socketId);
 
         const roomState = this.rooms.get(roomId);
         const closedProducerIds = [];
@@ -394,6 +416,7 @@ class RoomManager {
                 if (key.startsWith(socketId)) {
                     try { transport.close(); } catch (e) { /* already closed */ }
                     roomState.transports.delete(key);
+                    roomState.transportsById.delete(transport.id);
                 }
             }
         }
@@ -448,6 +471,7 @@ class RoomManager {
         roomState.consumers.forEach(cd => { try { cd.consumer?.close(); } catch (e) { /* yoksay */ } });
         roomState.producers.forEach(p => { try { p.close(); } catch (e) { /* yoksay */ } });
         roomState.transports.forEach(t => { try { t.close(); } catch (e) { /* yoksay */ } });
+        roomState.transportsById.clear();
         roomState.pipeTransports.forEach(pipe => {
             try { pipe.local?.close(); } catch (e) { /* yoksay */ }
             try { pipe.remote?.close(); } catch (e) { /* yoksay */ }
@@ -540,11 +564,7 @@ class RoomManager {
     }
 
     getRoomUserCount(roomId) {
-        let count = 0;
-        for (const [, data] of this.socketRooms) {
-            if (data.roomId === roomId) count++;
-        }
-        return count;
+        return this.roomUsers.get(roomId)?.size || 0;
     }
 
     isAdmin(socketId) {
@@ -566,6 +586,7 @@ class RoomManager {
     updateAdminSocket(roomId, socketId, ip) {
         database.updateAdminSocket(roomId, socketId);
         this.socketRooms.set(socketId, { roomId, role: 'admin', nickname: '', ip: ip || '' });
+        this.addMember(roomId, socketId, 'admin');
     }
 }
 

@@ -95,6 +95,43 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ==================== LOBİ YAYINI ====================
+
+// Oda listesini izleyen istemciler ayrı bir Socket.io odasında toplanır.
+// Eskiden her katılım/ayrılışta io.emit ile BAĞLI HER SOKETE gidiliyordu ve
+// lobi istemcileri bunu alınca tam bir get-rooms turu yapıyordu: N kullanıcılık
+// bir odaya giriş dalgası O(N²) mesaj üretiyordu.
+const LOBBY_ROOM = 'lobby';
+const ROOM_UPDATE_INTERVAL_MS = 1000;
+
+const pendingRoomUpdates = new Set();
+let roomUpdateTimer = null;
+
+/** Kullanıcı sayısı değişimlerini saniyede bir toplu gönder. */
+function queueRoomUpdate(roomId) {
+    if (!roomId) return;
+    pendingRoomUpdates.add(roomId);
+    if (roomUpdateTimer) return;
+
+    roomUpdateTimer = setTimeout(flushRoomUpdates, ROOM_UPDATE_INTERVAL_MS);
+    if (typeof roomUpdateTimer.unref === 'function') roomUpdateTimer.unref();
+}
+
+function flushRoomUpdates() {
+    roomUpdateTimer = null;
+    if (!pendingRoomUpdates.size) return;
+
+    const updates = [];
+    for (const roomId of pendingRoomUpdates) {
+        if (roomManager?.rooms.has(roomId)) {
+            updates.push({ id: roomId, userCount: roomManager.getRoomUserCount(roomId) });
+        }
+    }
+    pendingRoomUpdates.clear();
+
+    if (updates.length) io.to(LOBBY_ROOM).emit('rooms-updated', updates);
+}
+
 // ==================== INPUT HELPERS ====================
 
 /** Sanitize chat message: trim + limit length + basic safety */
@@ -113,6 +150,14 @@ io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id} ip=${clientIp}`);
 
     // ==================== LOBBY EVENTS ====================
+
+    // Lobi sayfası buraya abone olur; oda içi istemciler olmaz.
+    socket.on('lobby-subscribe', (callback) => {
+        socket.join(LOBBY_ROOM);
+        if (typeof callback === 'function') callback(roomManager.getAllRooms());
+    });
+
+    socket.on('lobby-unsubscribe', () => socket.leave(LOBBY_ROOM));
 
     socket.on('get-rooms', (callback) => {
         if (typeof callback !== 'function') return;
@@ -145,13 +190,13 @@ io.on('connection', (socket) => {
             adminToken: result.adminToken
         });
 
-        io.emit('room-created', {
+        io.to(LOBBY_ROOM).emit('room-created', {
             id: result.roomId, name, is_locked: !!password,
             userCount: 1, max_users: maxUsers || 100
         });
 
         roomManager.startOrphanTimeout(result.roomId, (roomId) => {
-            io.emit('room-deleted', { id: roomId });
+            io.to(LOBBY_ROOM).emit('room-deleted', { id: roomId });
         });
     });
 
@@ -281,7 +326,7 @@ io.on('connection', (socket) => {
         // Notify room
         socket.to(roomId).emit('user-joined', { userCount: roomManager.getRoomUserCount(roomId) });
         io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
-        io.emit('room-updated', { id: roomId, userCount: roomManager.getRoomUserCount(roomId) });
+        queueRoomUpdate(roomId);
     });
 
     socket.on('leave-room', () => handleLeaveRoom(socket));
@@ -294,7 +339,7 @@ io.on('connection', (socket) => {
         const roomId = socketData.roomId;
         io.to(roomId).emit('room-closed', { reason: 'Admin odayı kapattı' });
         roomManager.closeRoom(roomId);
-        io.emit('room-deleted', { id: roomId });
+        io.to(LOBBY_ROOM).emit('room-deleted', { id: roomId });
     });
 
     // Update max users (admin only)
@@ -342,7 +387,7 @@ io.on('connection', (socket) => {
         const newCount = roomManager.getRoomUserCount(roomId);
         io.to(roomId).emit('user-left', { userCount: newCount });
         io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
-        io.emit('room-updated', { id: roomId, userCount: newCount });
+        queueRoomUpdate(roomId);
 
         callback?.({ success: true });
     });
@@ -381,7 +426,7 @@ io.on('connection', (socket) => {
         const newCount = roomManager.getRoomUserCount(roomId);
         io.to(roomId).emit('user-left', { userCount: newCount });
         io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
-        io.emit('room-updated', { id: roomId, userCount: newCount });
+        queueRoomUpdate(roomId);
 
         callback?.({ success: true });
         console.log(`🚫 User ${targetSocketId} (IP: ${targetIp}) banned from room ${roomId}`);
@@ -521,10 +566,14 @@ io.on('connection', (socket) => {
             }
 
             roomState.transports.set(transportKey, transport);
+            roomState.transportsById.set(transport.id, transport);
 
             transport.on('close', () => {
                 if (roomState.transports.get(transportKey) === transport) {
                     roomState.transports.delete(transportKey);
+                }
+                if (roomState.transportsById.get(transport.id) === transport) {
+                    roomState.transportsById.delete(transport.id);
                 }
 
                 if (sender) {
@@ -868,25 +917,22 @@ function handleLeaveRoom(socket) {
 
     if (result.roomClosed) {
         io.to(result.roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
-        io.emit('room-deleted', { id: result.roomId });
+        io.to(LOBBY_ROOM).emit('room-deleted', { id: result.roomId });
     } else if (result.roomPending) {
         roomManager.startGracePeriod(result.roomId, (roomId) => {
             io.to(roomId).emit('room-closed', { reason: 'Admin ayrıldı' });
-            io.emit('room-deleted', { id: roomId });
+            io.to(LOBBY_ROOM).emit('room-deleted', { id: roomId });
         });
     } else {
         const newCount = roomManager.getRoomUserCount(result.roomId);
         socket.to(result.roomId).emit('user-left', { userCount: newCount });
         io.to(result.roomId).emit('user-list', roomManager.getUserList(result.roomId));
-        io.emit('room-updated', { id: result.roomId, userCount: newCount });
+        queueRoomUpdate(result.roomId);
     }
 }
 
 function findTransport(roomState, transportId) {
-    for (const [, transport] of roomState.transports) {
-        if (transport.id === transportId) return transport;
-    }
-    return null;
+    return roomState.transportsById.get(transportId) || null;
 }
 
 function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef, transportId = null) {
@@ -965,6 +1011,8 @@ async function stop() {
 
     // 2) Kuyruktaki disconnect işleyicileri boşalsın, bekleyen zamanlayıcılar iptal olsun
     await new Promise((resolve) => setImmediate(resolve));
+    if (roomUpdateTimer) { clearTimeout(roomUpdateTimer); roomUpdateTimer = null; }
+    pendingRoomUpdates.clear();
     if (roomManager) roomManager.cancelAllTimers();
 
     // 3) Medya ve veri katmanı

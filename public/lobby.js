@@ -21,25 +21,35 @@ async function initSocket() {
     socket = io(signalingUrl);
 
     socket.on('connect', () => {
-        console.log('Connected to server');
-        loadRooms();
+        // Lobi odasına abone ol: oda listesi güncellemeleri yalnızca buraya gelir.
+        // Abonelik cevabı ilk listeyi de taşıdığı için ek bir tur gerekmiyor.
+        socket.emit('lobby-subscribe', (rooms) => renderRooms(rooms || []));
     });
 
-    // Real-time room updates
+    // Yeni oda / kapanan oda seyrek olaylar: listeyi yeniden çiz.
     socket.on('room-created', (room) => {
-        console.log('Room created:', room);
-        loadRooms();
-    });
-
-    socket.on('room-updated', (update) => {
-        console.log('Room updated:', update);
-        loadRooms();
+        rooms.set(room.id, { ...rooms.get(room.id), ...room });
+        renderRooms([...rooms.values()]);
     });
 
     socket.on('room-deleted', ({ id }) => {
-        console.log('Room deleted:', id);
-        loadRooms();
+        if (rooms.delete(id)) renderRooms([...rooms.values()]);
     });
+
+    // Kullanıcı sayısı sık değişir ve sunucuda saniyede bir toplulaştırılır:
+    // tüm listeyi yeniden çizmek yerine yalnızca ilgili kartı yamalıyoruz.
+    socket.on('rooms-updated', (updates) => {
+        if (!Array.isArray(updates)) return;
+        updates.forEach(({ id, userCount }) => {
+            const room = rooms.get(id);
+            if (!room) return;
+            room.userCount = userCount;
+            patchRoomCard(room);
+        });
+    });
+
+    // Kaçan bir olaya karşı periyodik mutabakat (ucuz: dakikada iki tur).
+    setInterval(loadRooms, 30000);
 }
 
 // DOM Elements
@@ -69,28 +79,43 @@ let pendingRoomId = null;
 
 // ==================== ROOM LIST ====================
 
+// Ekrandaki modelin tek kopyası: id -> oda
+const rooms = new Map();
+
 function loadRooms() {
-    socket.emit('get-rooms', (rooms) => {
-        renderRooms(rooms);
-    });
+    if (!socket?.connected) return;
+    socket.emit('get-rooms', (list) => renderRooms(list || []));
 }
 
-function renderRooms(rooms) {
+function renderRooms(list) {
+    rooms.clear();
+    list.forEach(room => rooms.set(room.id, room));
+
     roomList.innerHTML = '';
 
-    if (rooms.length === 0) {
+    if (list.length === 0) {
         noRooms.classList.remove('hidden');
         roomCount.textContent = '0 oda';
         return;
     }
 
     noRooms.classList.add('hidden');
-    roomCount.textContent = `${rooms.length} oda`;
+    roomCount.textContent = `${list.length} oda`;
 
-    rooms.forEach(room => {
-        const card = createRoomCard(room);
-        roomList.appendChild(card);
-    });
+    list.forEach(room => roomList.appendChild(createRoomCard(room)));
+}
+
+/** Yalnızca kullanıcı sayısını ve doluluk çubuğunu güncelle. */
+function patchRoomCard(room) {
+    const card = roomList.querySelector(`[data-room-id="${CSS.escape(room.id)}"]`);
+    if (!card) return;
+
+    const countEl = card.querySelector('[data-role="user-count"]');
+    const barEl = card.querySelector('[data-role="fill-bar"]');
+    const max = room.max_users || 100;
+
+    if (countEl) countEl.textContent = `${room.userCount || 0}/${max}`;
+    if (barEl) barEl.style.width = `${Math.min(100, ((room.userCount || 0) / max) * 100)}%`;
 }
 
 function createRoomCard(room) {
@@ -119,12 +144,12 @@ function createRoomCard(room) {
         <div class="flex items-center justify-between text-sm text-slate-400 mb-2">
             <div class="flex items-center gap-1.5">
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
-                <span class="tabular-nums">${room.userCount || 0}/${room.max_users}</span>
+                <span class="tabular-nums" data-role="user-count">${room.userCount || 0}/${room.max_users}</span>
             </div>
             ${streamingBadge}
         </div>
         <div class="h-1 bg-slate-700/50 rounded-full overflow-hidden">
-            <div class="h-full bg-brand-500/50 rounded-full transition-all" style="width:${fillPct}%"></div>
+            <div class="h-full bg-brand-500/50 rounded-full transition-all" data-role="fill-bar" style="width:${fillPct}%"></div>
         </div>
     `;
 
