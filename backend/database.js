@@ -6,7 +6,8 @@ const Database = require('better-sqlite3');
 const bcrypt = require('bcrypt');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'rooms.db');
+// Testler ':memory:' verebilsin diye dışarıdan geçersiz kılınabilir.
+const DB_PATH = process.env.ROOMS_DB_PATH || path.join(__dirname, 'rooms.db');
 const BCRYPT_ROUNDS = 10;
 
 class RoomDatabase {
@@ -174,6 +175,7 @@ class RoomDatabase {
      * Close database connection
      */
     close() {
+        if (!this.db.open) return;
         this.db.close();
     }
 }

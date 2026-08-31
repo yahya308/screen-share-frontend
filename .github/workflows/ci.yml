@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: Backend testleri
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # Entegrasyon testi gerçek mediasoup worker'ı açar; CI makinesinde tek
+      # worker yeterli ve çok daha hızlı.
+      - run: npm test
+        env:
+          MEDIASOUP_WORKERS: '1'

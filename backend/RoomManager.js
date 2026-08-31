@@ -270,6 +270,7 @@ class RoomManager {
     }
 
     startOrphanTimeout(roomId, callback) {
+        this.cancelPendingAdminJoin(roomId);
         const t = setTimeout(() => {
             const roomState = this.rooms.get(roomId);
             if (roomState && !roomState.adminJoined) {
@@ -279,6 +280,7 @@ class RoomManager {
                 if (callback) callback(roomId);
             }
         }, 30000);
+        if (typeof t.unref === 'function') t.unref();
         this.pendingAdminJoin.set(roomId, t);
     }
 
@@ -386,12 +388,14 @@ class RoomManager {
     }
 
     startGracePeriod(roomId, callback) {
+        this.cancelPendingClose(roomId);
         const t = setTimeout(() => {
             console.log(`⏰ Grace period expired for room ${roomId}, closing...`);
             this.pendingClose.delete(roomId);
             this.closeRoom(roomId);
             if (callback) callback(roomId);
         }, ADMIN_GRACE_PERIOD);
+        if (typeof t.unref === 'function') t.unref();
         this.pendingClose.set(roomId, t);
     }
 
@@ -400,7 +404,7 @@ class RoomManager {
         if (t) {
             clearTimeout(t);
             this.pendingClose.delete(roomId);
-            console.log(`✅ Admin reconnected, cancelled pending close for room ${roomId}`);
+            console.log(`✅ Bekleyen kapanış iptal edildi: ${roomId}`);
             return true;
         }
         return false;
@@ -411,7 +415,7 @@ class RoomManager {
         if (t) {
             clearTimeout(t);
             this.pendingAdminJoin.delete(roomId);
-            console.log(`✅ Cancelled orphan timeout for room ${roomId}`);
+            console.log(`✅ Yetim oda zamanlayıcısı iptal edildi: ${roomId}`);
             return true;
         }
         return false;
@@ -440,10 +444,20 @@ class RoomManager {
             if (data.roomId === roomId) this.socketRooms.delete(socketId);
         }
 
-        this.pendingAdminJoin.delete(roomId);
-        this.pendingClose.delete(roomId);
+        // Zamanlayıcıları yalnızca haritadan silmek yetmez; iptal edilmeyen
+        // yetim zamanlayıcısı 30 sn sonra kapalı bir oda için tekrar çalışıyordu.
+        this.cancelPendingAdminJoin(roomId);
+        this.cancelPendingClose(roomId);
 
         console.log(`🗑️ Room ${roomId} closed`);
+    }
+
+    /** Bekleyen tüm zamanlayıcıları iptal et (düzgün kapanma ve testler). */
+    cancelAllTimers() {
+        for (const t of this.pendingClose.values()) clearTimeout(t);
+        for (const t of this.pendingAdminJoin.values()) clearTimeout(t);
+        this.pendingClose.clear();
+        this.pendingAdminJoin.clear();
     }
 
     // ==================== TRANSPORT ====================

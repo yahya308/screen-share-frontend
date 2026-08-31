@@ -67,3 +67,8 @@ build/
 # Project-specific generated files
 fallow_output.json
 *.patch
+
+# SQLite (oda kayıtları her açılışta sıfırlanır, depoya girmemeli)
+*.db
+*.db-journal
+*.sqlite

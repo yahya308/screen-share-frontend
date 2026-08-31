@@ -10,8 +10,11 @@ class RateLimiter {
         this.MAX_ATTEMPTS = 5;
         this.BLOCK_DURATION = 3 * 60 * 1000; // 3 minutes
 
-        // Cleanup expired entries every 5 minutes
-        setInterval(() => this.cleanup(), 5 * 60 * 1000);
+        // Cleanup expired entries every 5 minutes.
+        // unref: bu zamanlayıcı tek başına süreci ayakta tutmasın (testler ve
+        // düzgün kapanma askıda kalıyordu).
+        this.cleanupTimer = setInterval(() => this.cleanup(), 5 * 60 * 1000);
+        if (typeof this.cleanupTimer.unref === 'function') this.cleanupTimer.unref();
     }
 
     /**

@@ -60,6 +60,9 @@ const io = new Server(server, { cors: corsOptions });
 const workerManager = new WorkerManager();
 let roomManager;
 
+// Kapanış sırasında oda durumu güncellemeye çalışmayalım: sunucu zaten gidiyor.
+let shuttingDown = false;
+
 // ==================== HEALTH CHECK ENDPOINTS ====================
 
 app.get('/', (req, res) => {
@@ -778,6 +781,7 @@ io.on('connection', (socket) => {
     // ==================== DISCONNECT ====================
 
     socket.on('disconnect', () => {
+        if (shuttingDown) return;
         console.log(`Client disconnected: ${socket.id}`);
         handleLeaveRoom(socket);
     });
@@ -897,15 +901,60 @@ function closeConsumersOwnedBySocket(roomState, socketId, workerManagerRef) {
 
 // ==================== STARTUP ====================
 
-async function start() {
+/**
+ * Sunucuyu başlat.
+ * @param {{ port?: number }} options port 0 verilirse işletim sistemi boş bir port seçer (testler).
+ */
+async function start({ port } = {}) {
     await workerManager.init();
     roomManager = new RoomManager(workerManager);
 
-    const PORT = config.port || 3000;
-    server.listen(PORT, () => {
-        console.log(`🚀 VELOSTREAM Server v2 running on port ${PORT}`);
-        console.log(`📊 Workers: ${workerManager.workers.length}`);
+    const requestedPort = port !== undefined ? port : (config.port || 3000);
+
+    await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(requestedPort, () => {
+            server.removeListener('error', reject);
+            resolve();
+        });
+    });
+
+    const boundPort = server.address().port;
+    console.log(`🚀 VELOSTREAM Server v2 running on port ${boundPort}`);
+    console.log(`📊 Workers: ${workerManager.workers.length}`);
+
+    return { server, io, port: boundPort };
+}
+
+/**
+ * Kaynakları DOĞRU SIRAYLA kapat. Sıra önemli: soketler kapanmadan
+ * veritabanını kapatırsak, geç gelen 'disconnect' işleyicileri kapalı bir
+ * bağlantıya yazmaya çalışır.
+ */
+async function stop() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    // 1) İstemcileri düşür ve yeni bağlantıları reddet
+    io.disconnectSockets(true);
+    await new Promise((resolve) => io.close(() => resolve()));
+    await new Promise((resolve) => server.close(() => resolve()));
+
+    // 2) Kuyruktaki disconnect işleyicileri boşalsın, bekleyen zamanlayıcılar iptal olsun
+    await new Promise((resolve) => setImmediate(resolve));
+    if (roomManager) roomManager.cancelAllTimers();
+
+    // 3) Medya ve veri katmanı
+    await workerManager.closeAll();
+    database.close();
+}
+
+// Doğrudan çalıştırıldığında başlat; require edildiğinde (testler) başlatma.
+if (require.main === module) {
+    start().catch((error) => {
+        console.error('Başlatma hatası:', error);
+        process.exit(1);
     });
 }
 
-start().catch(console.error);
+module.exports = { app, server, io, start, stop, getRoomManager: () => roomManager };

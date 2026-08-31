@@ -1,34 +1,49 @@
 /**
  * WorkerManager - Multi-core Mediasoup Worker Pool
  * Manages worker lifecycle and load balancing
+ *
+ * İstatistikler worker INDEX'i ile anahtarlanır. Daha önce anahtar
+ * `worker.pid` idi ve kayıt yalnızca init() içinde oluşturuluyordu: bir worker
+ * öldüğünde yenisi farklı bir PID ile açılıyor, istatistik kaydı hiç
+ * oluşturulmuyor, eskisi de silinmiyordu. Yeniden başlatmadan sonraki ilk
+ * createRouter/incrementConsumers çağrısı tanımsız üzerinde çalışıp istisna
+ * fırlatıyordu. PID değişken bir kimlik, indeks ise sabit.
  */
 
 const mediasoup = require('mediasoup');
 const os = require('os');
 const config = require('./config');
 
+const RESTART_DELAY_MS = 2000;
+
 class WorkerManager {
     constructor() {
         this.workers = [];
-        this.workerStats = new Map(); // workerId -> { consumers, producers, routers }
+        this.workerStats = new Map(); // index -> { pid, consumers, producers, routers }
+        /** @type {null | (info: { index:number, roomIds:string[] }) => void} */
+        this.onWorkerDied = null;
+        this.closing = false;
+    }
+
+    /** Kaç worker açılacak: açık ayar > kullanılabilir paralellik > çekirdek sayısı. */
+    static resolveWorkerCount(env = process.env) {
+        const configured = parseInt(env.MEDIASOUP_WORKERS, 10);
+        if (Number.isFinite(configured) && configured > 0) return configured;
+        // os.cpus().length konteynerde HOST çekirdeklerini döndürür, cgroup
+        // kotasını değil: 2 vCPU'luk bir konteyner 16 worker açabiliyordu.
+        if (typeof os.availableParallelism === 'function') return os.availableParallelism();
+        return os.cpus().length;
     }
 
     async init() {
-        const numCores = os.cpus().length;
-        console.log(`🚀 Spawning ${numCores} Mediasoup workers...`);
+        const workerCount = WorkerManager.resolveWorkerCount();
+        console.log(`🚀 Spawning ${workerCount} Mediasoup workers...`);
 
-        for (let i = 0; i < numCores; i++) {
-            const worker = await this.createWorker(i);
-            this.workers.push(worker);
-            this.workerStats.set(worker.pid, {
-                index: i,
-                consumers: 0,
-                producers: 0,
-                routers: new Map() // roomId -> router
-            });
+        for (let i = 0; i < workerCount; i++) {
+            this.workers[i] = await this.createWorker(i);
         }
 
-        console.log(`✅ ${numCores} workers ready`);
+        console.log(`✅ ${workerCount} workers ready`);
         return this.workers;
     }
 
@@ -40,18 +55,50 @@ class WorkerManager {
             rtcMaxPort: config.mediasoup.worker.rtcMaxPort
         });
 
-        worker.on('died', (error) => {
-            console.error(`❌ Worker ${index} died:`, error);
-            // Restart worker
-            setTimeout(async () => {
-                const newWorker = await this.createWorker(index);
-                this.workers[index] = newWorker;
-                console.log(`🔄 Worker ${index} restarted`);
-            }, 2000);
+        // İstatistik kaydı worker ile BİRLİKTE oluşur; yeniden başlatmada da geçerli.
+        this.workerStats.set(index, {
+            index,
+            pid: worker.pid,
+            consumers: 0,
+            producers: 0,
+            routers: new Map() // roomId -> router
         });
+
+        worker.on('died', (error) => this.handleWorkerDeath(index, error));
 
         console.log(`  Worker ${index} started (PID: ${worker.pid})`);
         return worker;
+    }
+
+    /**
+     * Bir worker öldüğünde: üstündeki odaları KAYBEDİLMİŞ olarak bildir, sonra
+     * yerine yenisini aç. Sessiz kayıp çökmeden kötüdür — istemciler bağlı
+     * görünüp medya hiç gelmez.
+     */
+    handleWorkerDeath(index, error) {
+        if (this.closing) return;
+
+        const stats = this.workerStats.get(index);
+        const roomIds = stats ? [...stats.routers.keys()] : [];
+        console.error(`❌ Worker ${index} died (${roomIds.length} oda etkilendi):`, error && error.message);
+
+        this.workerStats.delete(index);
+        this.workers[index] = null;
+
+        if (typeof this.onWorkerDied === 'function') {
+            try { this.onWorkerDied({ index, roomIds }); }
+            catch (e) { console.error('onWorkerDied hatası:', e); }
+        }
+
+        setTimeout(async () => {
+            if (this.closing) return;
+            try {
+                this.workers[index] = await this.createWorker(index);
+                console.log(`🔄 Worker ${index} restarted`);
+            } catch (e) {
+                console.error(`Worker ${index} yeniden başlatılamadı:`, e);
+            }
+        }, RESTART_DELAY_MS).unref();
     }
 
     /**
@@ -59,20 +106,23 @@ class WorkerManager {
      */
     getLeastLoadedWorker() {
         let minLoad = Infinity;
-        let selectedWorker = this.workers[0];
-        let selectedIndex = 0;
+        let selectedIndex = -1;
 
-        this.workerStats.forEach((stats) => {
+        for (const [index, stats] of this.workerStats) {
+            if (!this.workers[index]) continue; // yeniden başlatma bekleyen slot
             const load = stats.consumers + stats.producers;
             if (load < minLoad) {
                 minLoad = load;
-                selectedWorker = this.workers[stats.index];
-                selectedIndex = stats.index;
+                selectedIndex = index;
             }
-        });
+        }
+
+        if (selectedIndex === -1) {
+            throw new Error('Kullanılabilir mediasoup worker yok');
+        }
 
         console.log(`📊 Selected Worker ${selectedIndex} (load: ${minLoad})`);
-        return { worker: selectedWorker, index: selectedIndex };
+        return { worker: this.workers[selectedIndex], index: selectedIndex };
     }
 
     /**
@@ -87,11 +137,15 @@ class WorkerManager {
      */
     async createRouter(workerIndex, roomId) {
         const worker = this.workers[workerIndex];
+        const stats = this.workerStats.get(workerIndex);
+        if (!worker || !stats) {
+            throw new Error(`Worker ${workerIndex} kullanılabilir değil`);
+        }
+
         const router = await worker.createRouter({
             mediaCodecs: config.mediasoup.router.mediaCodecs
         });
 
-        const stats = this.workerStats.get(worker.pid);
         stats.routers.set(roomId, router);
 
         console.log(`🔧 Router created for room ${roomId} on Worker ${workerIndex}`);
@@ -102,50 +156,55 @@ class WorkerManager {
      * Get router for a room
      */
     getRouter(workerIndex, roomId) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
-        return stats?.routers.get(roomId);
+        return this.workerStats.get(workerIndex)?.routers.get(roomId);
     }
 
     /**
      * Remove router when room closes
      */
     removeRouter(workerIndex, roomId) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
+        const stats = this.workerStats.get(workerIndex);
         const router = stats?.routers.get(roomId);
         if (router) {
-            router.close();
+            try { router.close(); } catch (e) { /* zaten kapalı */ }
             stats.routers.delete(roomId);
             console.log(`🗑️ Router removed for room ${roomId}`);
         }
     }
 
-    /**
-     * Update consumer count for a worker
-     */
+    // ==================== SAYAÇLAR ====================
+    // Hepsi kayıt yoksa sessizce geçer: kapanış ve worker ölümü sırasında geç
+    // gelen temizlik çağrıları süreci düşürmemeli.
+
     incrementConsumers(workerIndex) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
-        stats.consumers++;
+        const stats = this.workerStats.get(workerIndex);
+        if (stats) stats.consumers++;
     }
 
     decrementConsumers(workerIndex) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
-        if (stats.consumers > 0) stats.consumers--;
+        const stats = this.workerStats.get(workerIndex);
+        if (stats && stats.consumers > 0) stats.consumers--;
     }
 
     incrementProducers(workerIndex) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
-        stats.producers++;
+        const stats = this.workerStats.get(workerIndex);
+        if (stats) stats.producers++;
     }
 
     decrementProducers(workerIndex) {
-        const worker = this.workers[workerIndex];
-        const stats = this.workerStats.get(worker.pid);
-        if (stats.producers > 0) stats.producers--;
+        const stats = this.workerStats.get(workerIndex);
+        if (stats && stats.producers > 0) stats.producers--;
+    }
+
+    /** Tüm worker'ları kapat (düzgün kapanma ve testler). */
+    async closeAll() {
+        this.closing = true;
+        for (const worker of this.workers) {
+            if (!worker) continue;
+            try { worker.close(); } catch (e) { /* zaten kapalı */ }
+        }
+        this.workers = [];
+        this.workerStats.clear();
     }
 
     /**
@@ -153,16 +212,16 @@ class WorkerManager {
      */
     getStats() {
         const stats = [];
-        this.workerStats.forEach((data, pid) => {
+        this.workerStats.forEach((data) => {
             stats.push({
                 index: data.index,
-                pid,
+                pid: data.pid,
                 consumers: data.consumers,
                 producers: data.producers,
                 rooms: data.routers.size
             });
         });
-        return stats;
+        return stats.sort((a, b) => a.index - b.index);
     }
 }
 
