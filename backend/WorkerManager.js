@@ -13,6 +13,7 @@
 const mediasoup = require('mediasoup');
 const os = require('os');
 const config = require('./config');
+const log = require('./logger');
 
 const RESTART_DELAY_MS = 2000;
 
@@ -37,13 +38,13 @@ class WorkerManager {
 
     async init() {
         const workerCount = WorkerManager.resolveWorkerCount();
-        console.log(`🚀 Spawning ${workerCount} Mediasoup workers...`);
+        log.info(`🚀 Spawning ${workerCount} Mediasoup workers...`);
 
         for (let i = 0; i < workerCount; i++) {
             this.workers[i] = await this.createWorker(i);
         }
 
-        console.log(`✅ ${workerCount} workers ready`);
+        log.info(`✅ ${workerCount} workers ready`);
         return this.workers;
     }
 
@@ -66,7 +67,7 @@ class WorkerManager {
 
         worker.on('died', (error) => this.handleWorkerDeath(index, error));
 
-        console.log(`  Worker ${index} started (PID: ${worker.pid})`);
+        log.info(`  Worker ${index} started (PID: ${worker.pid})`);
         return worker;
     }
 
@@ -80,23 +81,23 @@ class WorkerManager {
 
         const stats = this.workerStats.get(index);
         const roomIds = stats ? [...stats.routers.keys()] : [];
-        console.error(`❌ Worker ${index} died (${roomIds.length} oda etkilendi):`, error && error.message);
+        log.error(`❌ Worker ${index} died (${roomIds.length} oda etkilendi):`, error && error.message);
 
         this.workerStats.delete(index);
         this.workers[index] = null;
 
         if (typeof this.onWorkerDied === 'function') {
             try { this.onWorkerDied({ index, roomIds }); }
-            catch (e) { console.error('onWorkerDied hatası:', e); }
+            catch (e) { log.error('onWorkerDied hatası:', e); }
         }
 
         setTimeout(async () => {
             if (this.closing) return;
             try {
                 this.workers[index] = await this.createWorker(index);
-                console.log(`🔄 Worker ${index} restarted`);
+                log.info(`🔄 Worker ${index} restarted`);
             } catch (e) {
-                console.error(`Worker ${index} yeniden başlatılamadı:`, e);
+                log.error(`Worker ${index} yeniden başlatılamadı:`, e);
             }
         }, RESTART_DELAY_MS).unref();
     }
@@ -121,7 +122,7 @@ class WorkerManager {
             throw new Error('Kullanılabilir mediasoup worker yok');
         }
 
-        console.log(`📊 Selected Worker ${selectedIndex} (load: ${minLoad})`);
+        log.debug(`📊 Selected Worker ${selectedIndex} (load: ${minLoad})`);
         return { worker: this.workers[selectedIndex], index: selectedIndex };
     }
 
@@ -148,7 +149,7 @@ class WorkerManager {
 
         stats.routers.set(roomId, router);
 
-        console.log(`🔧 Router created for room ${roomId} on Worker ${workerIndex}`);
+        log.debug(`🔧 Router created for room ${roomId} on Worker ${workerIndex}`);
         return router;
     }
 
@@ -168,7 +169,7 @@ class WorkerManager {
         if (router) {
             try { router.close(); } catch (e) { /* zaten kapalı */ }
             stats.routers.delete(roomId);
-            console.log(`🗑️ Router removed for room ${roomId}`);
+            log.debug(`🗑️ Router removed for room ${roomId}`);
         }
     }
 

@@ -5,6 +5,7 @@
 const Database = require('better-sqlite3');
 const bcrypt = require('bcrypt');
 const path = require('path');
+const log = require('./logger');
 
 // Testler ':memory:' verebilsin diye dışarıdan geçersiz kılınabilir.
 const DB_PATH = process.env.ROOMS_DB_PATH || path.join(__dirname, 'rooms.db');
@@ -35,7 +36,7 @@ class RoomDatabase {
         // Rooms are memory-based, so any DB entries are orphaned after restart
         this.clearAllRooms();
 
-        console.log('✅ Database initialized');
+        log.info('✅ Database initialized');
     }
 
     /**
@@ -44,7 +45,7 @@ class RoomDatabase {
     clearAllRooms() {
         const count = this.getRoomCount();
         if (count > 0) {
-            console.log(`🧹 Cleaning ${count} stale room(s) from previous session...`);
+            log.info(`🧹 Cleaning ${count} stale room(s) from previous session...`);
             this.db.exec('DELETE FROM rooms');
         }
     }
@@ -69,7 +70,7 @@ class RoomDatabase {
             stmt.run(id, name, passwordHash, adminSocketId, workerIndex, maxUsers || 100, Date.now());
             return true;
         } catch (error) {
-            console.error('Create room error:', error);
+            log.error('Create room error:', error);
             return false;
         }
     }

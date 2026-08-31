@@ -5,6 +5,7 @@
 const { v4: uuidv4 } = require('uuid');
 const database = require('./database');
 const adminAuth = require('./adminAuth');
+const log = require('./logger');
 
 const MAX_ROOMS = 50;
 // IP başına eşzamanlı oda ve oluşturma hızı: 50 odalık sunucu kotasının tek
@@ -274,7 +275,7 @@ class RoomManager {
         this.roomUsers.set(roomId, new Map());
         this.addMember(roomId, adminSocketId, 'admin');
 
-        console.log(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
+        log.info(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
         return { roomId, workerIndex, isPublic: !password, adminToken };
     }
 
@@ -318,7 +319,7 @@ class RoomManager {
         const t = setTimeout(() => {
             const roomState = this.rooms.get(roomId);
             if (roomState && !roomState.adminJoined) {
-                console.log(`⏰ Orphan room cleanup: ${roomId}`);
+                log.info(`⏰ Orphan room cleanup: ${roomId}`);
                 this.closeRoom(roomId);
                 this.pendingAdminJoin.delete(roomId);
                 if (callback) callback(roomId);
@@ -361,7 +362,7 @@ class RoomManager {
         this.addMember(roomId, socketId, 'viewer');
 
         const newUserCount = this.getRoomUserCount(roomId);
-        console.log(`👤 User ${socketId} joined room ${roomId} (total: ${newUserCount})`);
+        log.info(`👤 User ${socketId} joined room ${roomId} (total: ${newUserCount})`);
 
         return {
             success: true,
@@ -422,18 +423,18 @@ class RoomManager {
         }
 
         if (role === 'admin') {
-            console.log(`⏳ Admin disconnected from room ${roomId}, waiting for reconnect...`);
+            log.info(`⏳ Admin disconnected from room ${roomId}, waiting for reconnect...`);
             return { roomPending: true, roomId, closedProducerIds };
         }
 
-        console.log(`👋 User ${socketId} left room ${roomId}`);
+        log.info(`👋 User ${socketId} left room ${roomId}`);
         return { roomId, closedProducerIds };
     }
 
     startGracePeriod(roomId, callback) {
         this.cancelPendingClose(roomId);
         const t = setTimeout(() => {
-            console.log(`⏰ Grace period expired for room ${roomId}, closing...`);
+            log.info(`⏰ Grace period expired for room ${roomId}, closing...`);
             this.pendingClose.delete(roomId);
             this.closeRoom(roomId);
             if (callback) callback(roomId);
@@ -447,7 +448,7 @@ class RoomManager {
         if (t) {
             clearTimeout(t);
             this.pendingClose.delete(roomId);
-            console.log(`✅ Bekleyen kapanış iptal edildi: ${roomId}`);
+            log.info(`✅ Bekleyen kapanış iptal edildi: ${roomId}`);
             return true;
         }
         return false;
@@ -458,7 +459,7 @@ class RoomManager {
         if (t) {
             clearTimeout(t);
             this.pendingAdminJoin.delete(roomId);
-            console.log(`✅ Yetim oda zamanlayıcısı iptal edildi: ${roomId}`);
+            log.info(`✅ Yetim oda zamanlayıcısı iptal edildi: ${roomId}`);
             return true;
         }
         return false;
@@ -493,7 +494,7 @@ class RoomManager {
         this.cancelPendingAdminJoin(roomId);
         this.cancelPendingClose(roomId);
 
-        console.log(`🗑️ Room ${roomId} closed`);
+        log.info(`🗑️ Room ${roomId} closed`);
     }
 
     /** Bekleyen tüm zamanlayıcıları iptal et (düzgün kapanma ve testler). */
@@ -538,7 +539,7 @@ class RoomManager {
         const { pipeTransport: localPipe, pipeConsumer } = await roomState.router.pipeToRouter({ router: targetRouter });
 
         roomState.pipeTransports.set(targetWorkerIndex, { local: localPipe, consumer: pipeConsumer });
-        console.log(`🔗 PipeTransport: Worker ${roomState.workerIndex} → Worker ${targetWorkerIndex}`);
+        log.info(`🔗 PipeTransport: Worker ${roomState.workerIndex} → Worker ${targetWorkerIndex}`);
 
         return targetRouter;
     }

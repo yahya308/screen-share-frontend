@@ -6,7 +6,8 @@
     "scripts": {
         "start": "node server.js",
         "test": "node --test test/*.test.js",
-        "test:watch": "node --test --watch test/*.test.js"
+        "test:watch": "node --test --watch test/*.test.js",
+        "loadtest": "node loadtest/signaling-load.js"
     },
     "dependencies": {
         "bcrypt": "^6.0.0",

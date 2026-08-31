@@ -3,6 +3,8 @@
  * 5 failed attempts = 3 minute block
  */
 
+const log = require('./logger');
+
 class RateLimiter {
     constructor() {
         // Map: "ip:roomId" -> { attempts: number, blockedUntil: timestamp }
@@ -70,7 +72,7 @@ class RateLimiter {
 
         if (record.attempts >= this.MAX_ATTEMPTS) {
             record.blockedUntil = Date.now() + this.BLOCK_DURATION;
-            console.log(`🚫 IP ${ip} blocked for room ${roomId} for 3 minutes`);
+            log.info(`🚫 IP ${ip} blocked for room ${roomId} for 3 minutes`);
             return {
                 blocked: true,
                 remainingAttempts: 0,

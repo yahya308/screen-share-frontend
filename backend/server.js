@@ -17,6 +17,8 @@ const database = require('./database');
 const rateLimiter = require('./RateLimiter');
 const EventLimiter = require('./EventLimiter');
 const { getClientIp } = require('./clientIp');
+const metrics = require('./metrics');
+const log = require('./logger');
 
 // IP başına oda oluşturma hızı ve soket başına lobi sorgusu hızı.
 const CREATE_ROOM_MAX = parseInt(process.env.CREATE_ROOM_MAX, 10) > 0
@@ -33,8 +35,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 // düşülüyordu: yanlış yazılmış tek bir ortam değişkeni, sinyalleşme sunucusunu
 // herhangi bir web sitesinin gömebileceği hale getiriyordu.
 if (process.env.NODE_ENV === 'production' && !allowedOrigins.length) {
-    console.error('❌ ALLOWED_ORIGINS tanımsız. Üretimde CORS açık bırakılamaz.');
-    console.error('   Örnek: ALLOWED_ORIGINS=https://velostream.com.tr,https://www.velostream.com.tr');
+    log.error('❌ ALLOWED_ORIGINS tanımsız. Üretimde CORS açık bırakılamaz.');
+    log.error('   Örnek: ALLOWED_ORIGINS=https://velostream.com.tr,https://www.velostream.com.tr');
     process.exit(1);
 }
 
@@ -63,10 +65,10 @@ const keyPath = config.https?.key;
 
 if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
     server = https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }, app);
-    console.log('🔒 HTTPS Server');
+    log.info('🔒 HTTPS Server');
 } else {
     server = http.createServer(app);
-    console.log('⚠️  HTTP Server (SSL not found)');
+    log.info('⚠️  HTTP Server (SSL not found)');
 }
 
 const io = new Server(server, { cors: corsOptions });
@@ -132,6 +134,23 @@ function flushRoomUpdates() {
     if (updates.length) io.to(LOBBY_ROOM).emit('rooms-updated', updates);
 }
 
+/**
+ * Prometheus metrikleri. METRICS_TOKEN tanımlıysa token zorunlu; değilse
+ * yalnızca özel ağdan (loopback/RFC1918) erişilebilir — nginx bu yolu dışarı
+ * açmıyor, ama sunucu doğrudan da çalıştırılabildiği için varsayılan kapalı.
+ */
+app.get('/metrics', (req, res) => {
+    const ip = getClientIp({ headers: req.headers, address: req.socket.remoteAddress });
+    if (!metrics.isAuthorized(req, { ip })) {
+        res.status(404).end();
+        return;
+    }
+
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(metrics.render({ workerManager, roomManager, io }));
+});
+
 // ==================== INPUT HELPERS ====================
 
 /** Sanitize chat message: trim + limit length + basic safety */
@@ -147,7 +166,7 @@ io.on('connection', (socket) => {
     // X-Forwarded-For'un ilk ögesi asla güvenilmez (bkz. clientIp.js).
     const clientIp = getClientIp(socket.handshake);
 
-    console.log(`Client connected: ${socket.id} ip=${clientIp}`);
+    log.debug(`Client connected: ${socket.id} ip=${clientIp}`);
 
     // ==================== LOBBY EVENTS ====================
 
@@ -211,7 +230,7 @@ io.on('connection', (socket) => {
         // durum değiştirilmez (bekleyen kapanış iptali dahil), aksi halde
         // token'sız bir istek odanın yaşam döngüsünü etkileyebilirdi.
         if (!roomManager.verifyAdminToken(roomId, adminToken)) {
-            console.warn(`⛔ Yetkisiz admin-rejoin denemesi: room=${roomId} socket=${socket.id} ip=${clientIp}`);
+            log.warn(`⛔ Yetkisiz admin-rejoin denemesi: room=${roomId} socket=${socket.id} ip=${clientIp}`);
             callback({ error: 'Bu oda için yönetici yetkiniz yok', forbidden: true });
             return;
         }
@@ -231,7 +250,7 @@ io.on('connection', (socket) => {
                 previousSocket.emit('admin-superseded');
                 previousSocket.leave(roomId);
             }
-            console.log(`🔁 Admin devri: ${previousAdminSocketId} → ${socket.id} (room ${roomId})`);
+            log.info(`🔁 Admin devri: ${previousAdminSocketId} → ${socket.id} (room ${roomId})`);
         }
 
         roomManager.cancelPendingClose(roomId);
@@ -264,7 +283,7 @@ io.on('connection', (socket) => {
         // Broadcast updated user list
         io.to(roomId).emit('user-list', roomManager.getUserList(roomId));
 
-        console.log(`👑 Admin rejoined room ${roomId} as "${nickname.trim()}"`);
+        log.info(`👑 Admin rejoined room ${roomId} as "${nickname.trim()}"`);
     });
 
     // Join room (viewer)
@@ -429,7 +448,7 @@ io.on('connection', (socket) => {
         queueRoomUpdate(roomId);
 
         callback?.({ success: true });
-        console.log(`🚫 User ${targetSocketId} (IP: ${targetIp}) banned from room ${roomId}`);
+        log.info(`🚫 User ${targetSocketId} (IP: ${targetIp}) banned from room ${roomId}`);
     });
 
     // ==================== VIEWER MIC PERMISSION ====================
@@ -466,7 +485,7 @@ io.on('connection', (socket) => {
         }
 
         callback?.({ success: true });
-        console.log(`🎙️ Viewer mic ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
+        log.info(`🎙️ Viewer mic ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
     });
 
     // ==================== CHAT ====================
@@ -482,7 +501,7 @@ io.on('connection', (socket) => {
         io.to(socketData.roomId).emit('chat-state', { enabled: !!enabled });
 
         callback?.({ success: true });
-        console.log(`💬 Chat ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
+        log.info(`💬 Chat ${enabled ? 'enabled' : 'disabled'} in room ${socketData.roomId}`);
     });
 
     // Send chat message
@@ -562,7 +581,7 @@ io.on('connection', (socket) => {
                     await transport.setMaxOutgoingBitrate(config.mediasoup.webRtcTransport.maxIncomingBitrate);
                 }
             } catch (e) {
-                console.warn(`⚠️ Transport bitrate tuning skipped: ${e.message}`);
+                log.warn(`⚠️ Transport bitrate tuning skipped: ${e.message}`);
             }
 
             roomState.transports.set(transportKey, transport);
@@ -598,7 +617,7 @@ io.on('connection', (socket) => {
                 }
             });
         } catch (error) {
-            console.error('Transport create error:', error);
+            log.error('Transport create error:', error);
             callback({ params: { error: error.message } });
         }
     });
@@ -612,7 +631,7 @@ io.on('connection', (socket) => {
             await transport.connect({ dtlsParameters });
             callback?.({ success: true });
         } catch (e) {
-            console.warn('transport-connect error:', e);
+            log.warn('transport-connect error:', e);
             callback?.({ error: e.message });
         }
     });
@@ -626,7 +645,7 @@ io.on('connection', (socket) => {
             const iceParameters = await transport.restartIce();
             callback?.({ iceParameters });
         } catch (error) {
-            console.warn(`⚠️ ICE restart failed: ${error.message}`);
+            log.warn(`⚠️ ICE restart failed: ${error.message}`);
             callback?.({ error: error.message });
         }
     });
@@ -662,7 +681,7 @@ io.on('connection', (socket) => {
             workerManager.incrementProducers(socketData.roomState.workerIndex);
 
             producer.on('score', (score) => {
-                if (score[0]?.score < 5) console.warn(`⚠️ Low producer score: ${score[0]?.score}`);
+                if (score[0]?.score < 5) log.warn(`⚠️ Low producer score: ${score[0]?.score}`);
             });
 
             if (kind === 'video') {
@@ -681,7 +700,7 @@ io.on('connection', (socket) => {
             });
 
         } catch (error) {
-            console.error('Produce error:', error);
+            log.error('Produce error:', error);
             callback({ error: error.message });
         }
     });
@@ -698,7 +717,7 @@ io.on('connection', (socket) => {
             }
         }
 
-        console.log(`📡 Sending ${ids.length} producers to ${socket.id}`);
+        log.debug(`📡 Sending ${ids.length} producers to ${socket.id}`);
         callback(ids);
     });
 
@@ -743,7 +762,7 @@ io.on('connection', (socket) => {
 
             if (consumer.kind === 'video') {
                 try { await consumer.setPreferredLayers({ spatialLayer: maxSpatialLayer, temporalLayer: maxTemporalLayer }); }
-                catch (e) { console.warn(`⚠️ Could not set initial layers: ${e.message}`); }
+                catch (e) { log.warn(`⚠️ Could not set initial layers: ${e.message}`); }
 
                 consumer.on('score', (score) => autoAdjustConsumerLayers(consumerData, score));
             }
@@ -757,7 +776,7 @@ io.on('connection', (socket) => {
                 }
             });
         } catch (error) {
-            console.error('Consume error:', error);
+            log.error('Consume error:', error);
             callback({ params: { error: error.message } });
         }
     });
@@ -774,7 +793,7 @@ io.on('connection', (socket) => {
                     try { await consumerData.consumer.requestKeyFrame(); } catch (e) { /* yoksay */ }
                 }
             } catch (error) {
-                console.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
+                log.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
                 socketData.roomState.consumers.delete(consumerId);
             }
         }
@@ -854,7 +873,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         if (shuttingDown) return;
-        console.log(`Client disconnected: ${socket.id}`);
+        log.debug(`Client disconnected: ${socket.id}`);
         handleLeaveRoom(socket);
     });
 });
@@ -901,7 +920,7 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
         autoQuality.temporalLayer = temporalLayer;
         autoQuality.lastChange = now;
     } catch (error) {
-        console.warn(`⚠️ Auto layer adjust failed: ${error.message}`);
+        log.warn(`⚠️ Auto layer adjust failed: ${error.message}`);
     }
 }
 
@@ -989,8 +1008,8 @@ async function start({ port } = {}) {
     });
 
     const boundPort = server.address().port;
-    console.log(`🚀 VELOSTREAM Server v2 running on port ${boundPort}`);
-    console.log(`📊 Workers: ${workerManager.workers.length}`);
+    log.info(`🚀 VELOSTREAM Server v2 running on port ${boundPort}`);
+    log.info(`📊 Workers: ${workerManager.workers.length}`);
 
     return { server, io, port: boundPort };
 }
@@ -1023,7 +1042,7 @@ async function stop() {
 // Doğrudan çalıştırıldığında başlat; require edildiğinde (testler) başlatma.
 if (require.main === module) {
     start().catch((error) => {
-        console.error('Başlatma hatası:', error);
+        log.error('Başlatma hatası:', error);
         process.exit(1);
     });
 }
