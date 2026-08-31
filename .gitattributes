@@ -1,0 +1,13 @@
+# Depo genelinde LF; çalışma kopyasında platformun doğal satır sonu kullanılır.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.bat  text eol=crlf
+
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.woff  binary
+*.woff2 binary
