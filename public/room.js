@@ -1397,9 +1397,15 @@ async function startStream() {
         if (videoTrack.contentHint !== undefined) videoTrack.contentHint = 'detail';
 
         const codec = pickVideoCodec(false);
+        // VP9 SVC: 'L3T3_KEY' tek encoding'le 3 UZAMSAL + 3 zamansal katman verir.
+        // 'L1T3' yalnızca zamansal katman sunuyordu; bağlantısı zayıf izleyici
+        // 1080p almaya devam edip donuyor, sadece kare hızı düşüyordu. Artık
+        // sunucu çözünürlüğü de kademeli düşürebiliyor (bkz. backend/svcLayers.js).
+        // VP8/H264'te bu mod yok; onlar için davranış değişmiyor.
+        const scalabilityMode = pickScalabilityMode(codec);
         videoProducer = await producerTransport.produce({
             track: videoTrack,
-            encodings: [{ maxBitrate: bitrate, maxFramerate: actualFps, scalabilityMode: 'L1T3' }],
+            encodings: [{ maxBitrate: bitrate, maxFramerate: actualFps, scalabilityMode }],
             codec: codec || undefined,
             codecOptions: {
                 videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
@@ -2271,6 +2277,11 @@ async function setConsumerQuality(consumer, quality) {
 }
 
 // ==================== HELPERS ====================
+
+/** Seçilen codec VP9 ise uzamsal katmanlı SVC, değilse yalnızca zamansal. */
+function pickScalabilityMode(codec) {
+    return /vp9/i.test(codec?.mimeType || '') ? 'L3T3_KEY' : 'L1T3';
+}
 
 function pickVideoCodec(preferSimulcast) {
     const codecs = device?.rtpCapabilities?.codecs || [];

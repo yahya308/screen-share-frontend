@@ -18,6 +18,7 @@ const rateLimiter = require('./RateLimiter');
 const EventLimiter = require('./EventLimiter');
 const { getClientIp } = require('./clientIp');
 const metrics = require('./metrics');
+const svc = require('./svcLayers');
 const log = require('./logger');
 
 // IP başına oda oluşturma hızı ve soket başına lobi sorgusu hızı.
@@ -741,8 +742,9 @@ io.on('connection', (socket) => {
             if (consumer.kind === 'audio') await consumer.setPriority(255).catch(() => {});
             else if (consumer.kind === 'video') await consumer.setPriority(200).catch(() => {});
 
-            const maxSpatialLayer = Math.max(0, (consumer.rtpParameters.encodings?.length || 1) - 1);
-            const maxTemporalLayer = getMaxTemporalLayer(consumer.rtpParameters.encodings);
+            const encodings = consumer.rtpParameters.encodings;
+            const maxSpatialLayer = svc.getMaxSpatialLayer(encodings);
+            const maxTemporalLayer = svc.getMaxTemporalLayer(encodings);
 
             const consumerData = {
                 consumer,
@@ -880,18 +882,6 @@ io.on('connection', (socket) => {
 
 // ==================== HELPERS ====================
 
-function getMaxTemporalLayer(encodings = []) {
-    let max = 0;
-    for (const enc of encodings) {
-        const match = (enc?.scalabilityMode || '').match(/L\dT(\d)/i);
-        if (match) {
-            const layers = parseInt(match[1], 10);
-            if (Number.isFinite(layers) && layers > 0) max = Math.max(max, layers - 1);
-        }
-    }
-    return max;
-}
-
 async function autoAdjustConsumerLayers(consumerData, score = []) {
     const autoQuality = consumerData?.autoQuality;
     if (!autoQuality?.enabled || !consumerData?.consumer) return;
@@ -899,18 +889,7 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
     const now = Date.now();
     if (now - autoQuality.lastChange < 3000) return;
 
-    const scores = Array.isArray(score) ? score.map(s => s?.score).filter(s => typeof s === 'number') : [];
-    const overallScore = scores.length ? Math.min(...scores) : 10;
-
-    const { maxSpatialLayer, maxTemporalLayer } = autoQuality;
-    let { spatialLayer, temporalLayer } = autoQuality;
-
-    // Softened logic tailored for movie playback:
-    // Only drop 1 temporal layer (e.g. from 60 to 30fps) instead of plummeting to 15fps or 0fps
-    if (overallScore <= 3) temporalLayer = Math.max(0, maxTemporalLayer - 1);
-    else temporalLayer = maxTemporalLayer;
-
-    spatialLayer = maxSpatialLayer;
+    const { spatialLayer, temporalLayer } = svc.pickLayers(svc.overallScore(score), autoQuality);
 
     if (spatialLayer === autoQuality.spatialLayer && temporalLayer === autoQuality.temporalLayer) return;
 
