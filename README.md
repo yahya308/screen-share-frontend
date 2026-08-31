@@ -229,6 +229,22 @@ npm test          # 98 test, ~6 saniye
 - **Birim testler:** `adminAuth`, `clientIp`, `RateLimiter`, `EventLimiter`,
   `RoomManager`, `WorkerManager`, `svcLayers`, `metrics`
 
+### Tarayıcı duman testi (isteğe bağlı)
+
+Sunucu testleri sayfanın gerçekten açıldığını göstermez. `scripts/smoke-browser.js`
+gerçek Chromium'da lobi → oda oluşturma → yönetici girişi → izleyici katılımı
+akışını yürütür ve yalnızca tarayıcıda ortaya çıkan kırılmaları yakalar:
+derlenmiş CSS uygulanmış mı, `public/vendor/` ESM paketi adlandırılmış dışa
+aktarımları veriyor mu, hiçbir dış CDN'e istek gidiyor mu, token'sız
+`?admin=true` gerçekten lobiye geri atılıyor mu.
+
+```bash
+npm i -D playwright && npx playwright install chromium
+
+cd backend && node -e "require('./server.js').start({port:3100})" &
+BASE=http://localhost:3100 npm run smoke
+```
+
 CI (`.github/workflows/ci.yml`) her push'ta lint ve testleri çalıştırır.
 
 ---

@@ -23,9 +23,11 @@ const socketIoSource = path.join(root, 'node_modules', 'socket.io-client', 'dist
 fs.copyFileSync(socketIoSource, path.join(vendorDir, 'socket.io.min.js'));
 console.log('✅ vendor/socket.io.min.js');
 
-// mediasoup-client'ın npm paketi tarayıcıya hazır değil: tek dosyalık ESM'e paketle.
+// mediasoup-client CommonJS yayınlıyor; doğrudan paketlenirse tarayıcı
+// `import { Device }` satırında patlar. Adlandırılmış dışa aktarımları
+// yeniden yayınlayan bir ESM girişinden paketliyoruz.
 esbuild.buildSync({
-    entryPoints: [path.join(root, 'node_modules', 'mediasoup-client', 'lib', 'index.js')],
+    entryPoints: [path.join(__dirname, 'vendor', 'mediasoup-client-entry.js')],
     bundle: true,
     format: 'esm',
     minify: true,

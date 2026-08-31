@@ -2386,6 +2386,15 @@ btnConfirmLeave?.addEventListener('click', () => {
         }
     } catch (e) { /* yoksay */ }
 
+    // Yönetici sırrı olmadan yönetici moduna girilmez. Kontrolü takma ad
+    // sorulmadan ÖNCE yapıyoruz: aksi halde bağlantısı zaten reddedilecek bir
+    // ziyaretçiye önce form doldurtmuş oluruz.
+    if (isAdminMode && !readAdminToken()) {
+        showToast('Bu oda için yönetici oturumunuz yok, lobiye dönülüyor', 'warning', 4000);
+        setTimeout(() => { window.location.href = 'index.html'; }, 1800);
+        return;
+    }
+
     initMicNoiseSuppressionControls();
     const nickname = await showNicknameModal();
     await initSocket(nickname);

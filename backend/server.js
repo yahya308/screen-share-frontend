@@ -98,6 +98,17 @@ app.get('/health', (req, res) => {
     });
 });
 
+/**
+ * Yerel geliştirme için /api/config yedeği.
+ *
+ * Üretimde bu uç nokta Vercel'de serverless olarak yayınlanıyor; sunucuyu
+ * doğrudan çalıştırdığınızda ise 404 dönüyordu ve tarayıcı konsolunu
+ * kirletiyordu. Boş signalingUrl, istemcinin aynı origin'e bağlanması demek.
+ */
+app.get('/api/config', (req, res) => {
+    res.status(200).json({ signalingUrl: process.env.SIGNALING_URL || '' });
+});
+
 // ==================== LOBİ YAYINI ====================
 
 // Oda listesini izleyen istemciler ayrı bir Socket.io odasında toplanır.

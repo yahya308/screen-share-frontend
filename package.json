@@ -11,7 +11,8 @@
     "lint:fix": "eslint . --ext .js --fix",
     "build:css": "tailwindcss -c tailwind.config.js -i src/tailwind.css -o public/styles.css --minify",
     "build:vendor": "node scripts/build-vendor.js",
-    "test": "npm --prefix backend test"
+    "test": "npm --prefix backend test",
+    "smoke": "node scripts/smoke-browser.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
