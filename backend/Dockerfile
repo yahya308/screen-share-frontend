@@ -6,9 +6,15 @@
 # Eskiden `npm install --only=production` kullanılıyordu: bayrak Node 16'dan
 # beri kullanımdan kalktı ve package-lock.json'u yok sayabiliyordu, yani her
 # derleme farklı sürümler kurabiliyordu. `npm ci` kilidi birebir uygular.
+#
+# Node 22: mediasoup 3.19 `engines: node >=22` istiyor. İmaj node:20'de
+# kaldığı sürece npm bunu yalnızca EBADENGINE UYARISI olarak geçiyor, build
+# başarılı görünüyor ve uyumsuzluk üretimde ortaya çıkıyordu. Her iki aşama
+# da aynı dağıtımı (bookworm) kullanmalı: derlenen mediasoup worker ikilisi
+# çalışma imajındaki glibc ile eşleşsin.
 
 # ─────────────── Aşama 1: bağımlılıklar ───────────────
-FROM node:20-bullseye AS deps
+FROM node:22-bookworm AS deps
 
 # mediasoup 3.19 arm64/x64 için hazır worker ikilisi indiriyor; indirme
 # başarısız olursa meson/ninja ile KAYNAKTAN derliyor ve bunun için pip
@@ -25,7 +31,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ─────────────── Aşama 2: çalışma imajı ───────────────
-FROM node:20-bullseye-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 

@@ -68,7 +68,7 @@ graph LR
 | Katman | Teknoloji | Nerede çalışır |
 |---|---|---|
 | Ön yüz | Vanilla JS (ES modülleri) + Tailwind (derlenmiş) | Vercel |
-| Sinyalleşme | Node.js 18+, Express, Socket.io | Oracle Cloud VPS |
+| Sinyalleşme | Node.js 22+, Express, Socket.io | Oracle Cloud VPS |
 | SFU | Mediasoup 3 | aynı VPS, worker başına bir süreç |
 | Oda kaydı | better-sqlite3 (RAM'e eşlenik, açılışta sıfırlanır) | aynı VPS |
 | TLS / ters vekil | Nginx + Let's Encrypt (Certbot) | aynı VPS |
@@ -123,7 +123,7 @@ satır içi olay işleyicisi yoktur.
 
 ### Gereksinimler
 
-- Node.js 18+ (yerel geliştirme ve testler)
+- Node.js 22+ — mediasoup 3.19 bunu şart koşuyor (`engines: node >=22`)
 - Docker + Docker Compose (sunucu)
 - Genel IP'li bir VPS ve bir alan adı (TLS için)
 
