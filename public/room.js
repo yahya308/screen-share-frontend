@@ -362,6 +362,12 @@ function registerSocketEvents() {
     });
 
     // Moderation
+    // Sunucu düzgün kapanıyor: "bağlantı koptu" yerine ne olduğunu söyle.
+    // Socket.io yeniden bağlanma zaten açık, sayfayı terk etmeye gerek yok.
+    socket.on('server-restarting', ({ reason }) => {
+        showToast(reason || 'Sunucu güncelleniyor, yeniden bağlanılıyor...', 'warning', 8000);
+    });
+
     // Aynı token başka bir sekmede/cihazda kullanıldı: bu oturum yöneticiliği bıraktı.
     socket.on('admin-superseded', () => {
         isAdmin = false;

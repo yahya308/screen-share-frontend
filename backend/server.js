@@ -997,6 +997,20 @@ async function start({ port } = {}) {
     await workerManager.init();
     roomManager = new RoomManager(workerManager);
 
+    // Ölen bir worker'ın odalarını AÇIKÇA tahliye et. Eskiden bu odaların
+    // router'ları sessizce kayboluyordu: istemciler bağlı görünüyor ama medya
+    // hiç gelmiyordu. Sessiz kayıp, hata mesajından kötü bir deneyimdir.
+    workerManager.onWorkerDied = ({ index, roomIds }) => {
+        for (const roomId of roomIds) {
+            io.to(roomId).emit('room-closed', { reason: 'Sunucu kaynağı yeniden başlatıldı, odayı yeniden açın' });
+            roomManager.closeRoom(roomId);
+            io.to(LOBBY_ROOM).emit('room-deleted', { id: roomId });
+        }
+        if (roomIds.length) {
+            log.warn(`⚠️ Worker ${index} öldü, ${roomIds.length} oda tahliye edildi`);
+        }
+    };
+
     const requestedPort = port !== undefined ? port : (config.port || 3000);
 
     await new Promise((resolve, reject) => {
@@ -1019,9 +1033,15 @@ async function start({ port } = {}) {
  * veritabanını kapatırsak, geç gelen 'disconnect' işleyicileri kapalı bir
  * bağlantıya yazmaya çalışır.
  */
-async function stop() {
+async function stop({ notifyClients = false, drainMs = 500 } = {}) {
     if (shuttingDown) return;
     shuttingDown = true;
+
+    // 0) İstemcilere haber ver ki "bağlantı koptu" yerine ne olduğunu görsünler
+    if (notifyClients) {
+        io.emit('server-restarting', { reason: 'Sunucu güncelleniyor, birazdan yeniden bağlanılacak' });
+        await new Promise((resolve) => setTimeout(resolve, drainMs));
+    }
 
     // 1) İstemcileri düşür ve yeni bağlantıları reddet
     io.disconnectSockets(true);
@@ -1039,8 +1059,37 @@ async function stop() {
     database.close();
 }
 
+/**
+ * Düzgün kapanma. SIGTERM/SIGINT dinleyicisi yoktu: her `docker compose up -d
+ * --build` ya da PM2 yeniden başlatması canlı odaları hiçbir uyarı vermeden
+ * koparıyor, kullanıcılar boş bir lobiye düşüp nedenini anlamıyordu.
+ */
+function installSignalHandlers() {
+    const shutdown = async (signal) => {
+        log.info(`\n${signal} alındı, düzgün kapanılıyor...`);
+        const timer = setTimeout(() => {
+            log.error('Kapanma zaman aşımına uğradı, zorla çıkılıyor');
+            process.exit(1);
+        }, 10000);
+        timer.unref();
+
+        try {
+            await stop({ notifyClients: true });
+            log.info('✅ Kapandı');
+            process.exit(0);
+        } catch (error) {
+            log.error('Kapanma hatası:', error);
+            process.exit(1);
+        }
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
 // Doğrudan çalıştırıldığında başlat; require edildiğinde (testler) başlatma.
 if (require.main === module) {
+    installSignalHandlers();
     start().catch((error) => {
         log.error('Başlatma hatası:', error);
         process.exit(1);
@@ -1048,7 +1097,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    app, server, io, start, stop,
+    app, server, io, start, stop, workerManager,
     getRoomManager: () => roomManager,
     limiters: { createRoom: createRoomLimiter, listRooms: listRoomsLimiter }
 };

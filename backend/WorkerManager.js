@@ -24,6 +24,9 @@ class WorkerManager {
         /** @type {null | (info: { index:number, roomIds:string[] }) => void} */
         this.onWorkerDied = null;
         this.closing = false;
+        // index -> yeniden başlatma zamanlayıcısı. İptal edilebilir olmalı:
+        // aksi halde kapanıştan sonra tetiklenip yeni bir alt süreç doğuruyor.
+        this.restartTimers = new Map();
     }
 
     /** Kaç worker açılacak: açık ayar > kullanılabilir paralellik > çekirdek sayısı. */
@@ -83,6 +86,12 @@ class WorkerManager {
         const roomIds = stats ? [...stats.routers.keys()] : [];
         log.error(`❌ Worker ${index} died (${roomIds.length} oda etkilendi):`, error && error.message);
 
+        // Referansı bırakmadan önce kapatmayı dene: mediasoup 'died'ı kanal
+        // hatasında da yayabiliyor ve alt süreç hayatta kalabiliyor. Kapatmazsak
+        // sahipsiz bir worker süreci arkada kalır.
+        const dying = this.workers[index];
+        if (dying) { try { dying.close(); } catch (e) { /* zaten ölü */ } }
+
         this.workerStats.delete(index);
         this.workers[index] = null;
 
@@ -91,15 +100,20 @@ class WorkerManager {
             catch (e) { log.error('onWorkerDied hatası:', e); }
         }
 
-        setTimeout(async () => {
+        const timer = setTimeout(async () => {
+            this.restartTimers.delete(index);
             if (this.closing) return;
             try {
-                this.workers[index] = await this.createWorker(index);
+                const replacement = await createWorkerIfNeeded(this, index);
+                if (!replacement) return;
+                this.workers[index] = replacement;
                 log.info(`🔄 Worker ${index} restarted`);
             } catch (e) {
                 log.error(`Worker ${index} yeniden başlatılamadı:`, e);
             }
-        }, RESTART_DELAY_MS).unref();
+        }, RESTART_DELAY_MS);
+        if (typeof timer.unref === 'function') timer.unref();
+        this.restartTimers.set(index, timer);
     }
 
     /**
@@ -200,6 +214,10 @@ class WorkerManager {
     /** Tüm worker'ları kapat (düzgün kapanma ve testler). */
     async closeAll() {
         this.closing = true;
+
+        for (const timer of this.restartTimers.values()) clearTimeout(timer);
+        this.restartTimers.clear();
+
         for (const worker of this.workers) {
             if (!worker) continue;
             try { worker.close(); } catch (e) { /* zaten kapalı */ }
@@ -224,6 +242,20 @@ class WorkerManager {
         });
         return stats.sort((a, b) => a.index - b.index);
     }
+}
+
+/**
+ * Yeniden başlatma ile kapanma arasındaki yarışı kapatır: worker açıldıktan
+ * SONRA kapanma başlamışsa yenisini hemen kapat, arkada canlı worker kalmasın.
+ */
+async function createWorkerIfNeeded(manager, index) {
+    const worker = await manager.createWorker(index);
+    if (manager.closing) {
+        try { worker.close(); } catch (e) { /* yoksay */ }
+        manager.workerStats.delete(index);
+        return null;
+    }
+    return worker;
 }
 
 module.exports = WorkerManager;

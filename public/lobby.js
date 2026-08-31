@@ -48,6 +48,10 @@ async function initSocket() {
         });
     });
 
+    socket.on('server-restarting', ({ reason }) => {
+        showToast(reason || 'Sunucu güncelleniyor, yeniden bağlanılıyor...', 6000);
+    });
+
     // Kaçan bir olaya karşı periyodik mutabakat (ucuz: dakikada iki tur).
     setInterval(loadRooms, 30000);
 }
