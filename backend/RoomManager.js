@@ -4,6 +4,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const database = require('./database');
+const adminAuth = require('./adminAuth');
 
 const MAX_ROOMS = 50;
 const PIPE_THRESHOLD = 100;
@@ -220,6 +221,9 @@ class RoomManager {
             return { error: 'Oda oluşturulamadı' };
         }
 
+        // Yönetici yetkisinin tek kanıtı: yalnızca odayı kuran istemciye dönen sır.
+        const adminToken = adminAuth.issueToken();
+
         this.rooms.set(roomId, {
             workerIndex,
             router,
@@ -230,6 +234,7 @@ class RoomManager {
             pipeProducers: new Map(),
             isStreaming: false,
             adminJoined: false,
+            adminToken,
             viewerMicEnabled: true,   // Can viewers use mic?
             chatEnabled: true          // Is chat open?
         });
@@ -238,7 +243,30 @@ class RoomManager {
         this.roomUsers.set(roomId, new Map());
 
         console.log(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
-        return { roomId, workerIndex, isPublic: !password };
+        return { roomId, workerIndex, isPublic: !password, adminToken };
+    }
+
+    // ==================== ADMIN TOKEN ====================
+
+    /**
+     * Verilen token bu odanın yöneticisine ait mi?
+     * Oda yoksa ya da token boşsa daima false.
+     */
+    verifyAdminToken(roomId, token) {
+        const roomState = this.rooms.get(roomId);
+        if (!roomState) return false;
+        return adminAuth.verifyToken(roomState.adminToken, token);
+    }
+
+    /**
+     * Odada hâlihazırda bağlı bir yönetici soketi var mı?
+     * @returns {string|null} socketId
+     */
+    getConnectedAdminSocketId(roomId) {
+        for (const [socketId, data] of this.socketRooms) {
+            if (data.roomId === roomId && data.role === 'admin') return socketId;
+        }
+        return null;
     }
 
     startOrphanTimeout(roomId, callback) {

@@ -224,6 +224,18 @@ btnConfirmCreate.addEventListener('click', () => {
             return;
         }
 
+        // Yönetici sırrını sakla: room.js bunu admin-rejoin'de sunucuya
+        // kanıt olarak gönderecek. URL'deki ?admin=true artık tek başına
+        // hiçbir yetki vermiyor.
+        if (result.adminToken) {
+            try {
+                sessionStorage.setItem(`velo_admin_token_${result.roomId}`, result.adminToken);
+            } catch (e) {
+                showToast('Tarayıcı depolaması kapalı, yönetici olarak giriş yapılamaz');
+                return;
+            }
+        }
+
         // Success - redirect to room as admin
         createModal.classList.add('hidden');
         window.location.href = `room.html?roomId=${result.roomId}&admin=true`;

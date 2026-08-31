@@ -13,6 +13,19 @@ const isAdminMode = urlParams.get('admin') === 'true';
 
 if (!roomId) window.location.href = 'index.html';
 
+const ADMIN_TOKEN_KEY = `velo_admin_token_${roomId}`;
+
+/** Odayı kurarken saklanan yönetici sırrını oku (yoksa ''). */
+function readAdminToken() {
+    try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; }
+    catch { return ''; }
+}
+
+function clearAdminToken() {
+    try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); }
+    catch { /* depolama kapalı olabilir */ }
+}
+
 // ==================== STATE ====================
 
 let socket;
@@ -250,9 +263,20 @@ async function initSocket(nickname) {
         console.log('Connected:', socket.id);
 
         if (isAdminMode) {
-            socket.emit('admin-rejoin', { roomId, nickname }, async (result) => {
+            const adminToken = readAdminToken();
+            if (!adminToken) {
+                showToast('Yönetici oturumu bulunamadı, lobiye dönülüyor', 'warning');
+                setTimeout(() => window.location.href = 'index.html', 1500);
+                return;
+            }
+
+            socket.emit('admin-rejoin', { roomId, nickname, adminToken }, async (result) => {
                 if (result.error) {
-                    if (result.error.includes('nickname') || result.error.includes('Nickname')) {
+                    if (result.forbidden) {
+                        clearAdminToken();
+                        showToast(result.error);
+                        setTimeout(() => window.location.href = 'index.html', 2000);
+                    } else if (result.error.includes('nickname') || result.error.includes('Nickname')) {
                         sessionStorage.removeItem('velo_nickname');
                         showToast(result.error);
                         setTimeout(() => window.location.reload(), 1500);
@@ -338,6 +362,13 @@ function registerSocketEvents() {
     });
 
     // Moderation
+    // Aynı token başka bir sekmede/cihazda kullanıldı: bu oturum yöneticiliği bıraktı.
+    socket.on('admin-superseded', () => {
+        isAdmin = false;
+        showToast('Yöneticilik başka bir oturuma devredildi', 'warning', 5000);
+        setTimeout(() => window.location.href = 'index.html', 2500);
+    });
+
     socket.on('you-were-kicked', () => {
         alert('Oda sahibi tarafından odadan atıldınız!');
         window.location.href = 'index.html';

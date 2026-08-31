@@ -98,7 +98,14 @@ io.on('connection', (socket) => {
         if (result.error) { callback({ error: result.error }); return; }
 
         socket.join(result.roomId);
-        callback({ success: true, roomId: result.roomId, isPublic: result.isPublic });
+        // adminToken SADECE burada, odayı kuran istemciye döner. Başka hiçbir
+        // olay bu değeri yaymaz; oda listesinde de yer almaz.
+        callback({
+            success: true,
+            roomId: result.roomId,
+            isPublic: result.isPublic,
+            adminToken: result.adminToken
+        });
 
         io.emit('room-created', {
             id: result.roomId, name, is_locked: !!password,
@@ -111,15 +118,38 @@ io.on('connection', (socket) => {
     });
 
     // Admin rejoin after page redirect
-    socket.on('admin-rejoin', async ({ roomId, nickname }, callback) => {
+    socket.on('admin-rejoin', async ({ roomId, nickname, adminToken }, callback) => {
         if (typeof callback !== 'function') return;
 
         const room = database.getRoom(roomId);
         if (!room) { callback({ error: 'Oda bulunamadı' }); return; }
 
+        // ⚠️ Yetki kontrolü her şeyden önce gelir: token doğrulanmadan hiçbir
+        // durum değiştirilmez (bekleyen kapanış iptali dahil), aksi halde
+        // token'sız bir istek odanın yaşam döngüsünü etkileyebilirdi.
+        if (!roomManager.verifyAdminToken(roomId, adminToken)) {
+            console.warn(`⛔ Yetkisiz admin-rejoin denemesi: room=${roomId} socket=${socket.id} ip=${clientIp}`);
+            callback({ error: 'Bu oda için yönetici yetkiniz yok', forbidden: true });
+            return;
+        }
+
         // Validate nickname
         const nickErr = RoomManager.validateNickname(nickname);
         if (nickErr) { callback({ error: nickErr }); return; }
+
+        // Token doğru ama başka bir sekmede/cihazda hâlâ bağlı bir yönetici
+        // varsa devri tamamla: eski soket yönetici rolünü bırakır. Token'ı
+        // bilen kişi her zaman odasına dönebilmeli.
+        const previousAdminSocketId = roomManager.getConnectedAdminSocketId(roomId);
+        if (previousAdminSocketId && previousAdminSocketId !== socket.id) {
+            roomManager.leaveRoom(previousAdminSocketId);
+            const previousSocket = io.sockets.sockets.get(previousAdminSocketId);
+            if (previousSocket) {
+                previousSocket.emit('admin-superseded');
+                previousSocket.leave(roomId);
+            }
+            console.log(`🔁 Admin devri: ${previousAdminSocketId} → ${socket.id} (room ${roomId})`);
+        }
 
         roomManager.cancelPendingClose(roomId);
         roomManager.cancelPendingAdminJoin(roomId);
