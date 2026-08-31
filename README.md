@@ -183,20 +183,32 @@ ufw allow 40000:49999/tcp   # WebRTC (UDP engelliyse yedek)
 
 ```bash
 ssh <sunucu>
-cd screen-share-frontend
+
+# Compose projesi nerede? (aynı sunucuda başka projeler varsa önemli)
+docker compose ls
+
+cd <proje dizini>
 git pull
 
-docker compose up -d --build
+# Yalnızca uygulama servisini yeniden derle: nginx ve certbot dokunulmadan kalır
+docker compose up -d --build mediasoup
 docker compose logs -f mediasoup
 ```
 
 `docker-compose.yml` üç servis çalıştırır: `mediasoup` (uygulama, host ağı),
 `nginx` (TLS sonlandırma ve WebSocket vekilliği) ve `certbot` (sertifika
-yenileme). Uygulama servisine 20 saniyelik `stop_grace_period` tanımlıdır:
+yenileme). Nginx yapılandırması değişmediği sürece yalnızca `mediasoup`
+servisini yeniden başlatmak yeterlidir. Uygulama servisine 20 saniyelik `stop_grace_period` tanımlıdır:
 SIGTERM alındığında sunucu odalara `server-restarting` yayınlar, soketleri,
 mediasoup worker'larını ve veritabanını sırayla kapatır. Yani dağıtım artık
 canlı odaları habersiz koparmaz — ama odalar yine de yeniden başlatmayı
 atlatamaz (bkz. *Odaların yaşam döngüsü*).
+
+> **Dağıtım sırası önemli.** Yeni ön yüz yeni sunucuyu gerektirir (`adminToken`,
+> `lobby-subscribe`) ve tersi de doğrudur: eski ön yüz yeni sunucuda yönetici
+> olamaz, çünkü token göndermez. **Önce backend'i güncelleyin, hemen ardından
+> `main`'e merge edin.** Aradaki birkaç dakikada mevcut odalar çalışmaya devam
+> eder, yalnızca yeni oda açma bozulur.
 
 ### Ön yüz (Vercel)
 

@@ -10,8 +10,12 @@
 # ─────────────── Aşama 1: bağımlılıklar ───────────────
 FROM node:20-bullseye AS deps
 
+# mediasoup 3.19 arm64/x64 için hazır worker ikilisi indiriyor; indirme
+# başarısız olursa meson/ninja ile KAYNAKTAN derliyor ve bunun için pip
+# gerekiyor. Bu aşama son imaja girmediği için fazladan paketin bedeli yok.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    python3-pip \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,6 +31,11 @@ WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --chown=node:node . .
+
+# WORKDIR'i root oluşturuyor: dosyaların sahibini değiştirmek yetmez, DİZİNİN
+# kendisi de yazılabilir olmalı. Aksi halde better-sqlite3 rooms.db dosyasını
+# oluşturamaz ve konteyner açılışta çöker.
+RUN chown node:node /app
 
 # Ayrıcalıksız kullanıcı: süreç artık root değil.
 USER node

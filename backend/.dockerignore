@@ -1,0 +1,18 @@
+# Derleme bağlamından çıkarılanlar.
+#
+# node_modules ÖNEMLİ: `COPY . .` satırı `--from=deps` ile gelen node_modules'ü
+# üzerine yazardı. Sunucuda Docker dışı bir `npm install` yapılmışsa imaj,
+# kilit dosyasıyla üretilmiş bağımlılıklar yerine oradaki kopyayı taşırdı.
+node_modules
+npm-debug.log*
+
+# Üretimde çalışmayanlar (devDependency gerektiriyorlar)
+test
+loadtest
+
+# Yerel çalıştırmadan kalan veriler ve sırlar
+*.db
+*.db-journal
+*.sqlite
+.env
+.env.*

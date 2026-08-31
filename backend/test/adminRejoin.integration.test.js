@@ -37,16 +37,26 @@ function connect() {
     return new Promise((resolve, reject) => {
         const socket = ioClient(baseUrl, { transports: ['websocket'], forceNew: true, reconnection: false });
         openSockets.add(socket);
-        socket.on('connect', () => resolve(socket));
-        socket.on('connect_error', reject);
+        const timer = setTimeout(() => reject(new Error('istemci 15 sn içinde bağlanamadı')), 15000);
+        socket.on('connect', () => { clearTimeout(timer); resolve(socket); });
+        socket.on('connect_error', (e) => { clearTimeout(timer); reject(e); });
     });
 }
 
 /** Callback'li bir olayı promise'e çevirir. */
 function emit(socket, event, payload) {
-    return new Promise((resolve) => {
-        if (payload === undefined) socket.emit(event, resolve);
-        else socket.emit(event, payload, resolve);
+    return new Promise((resolve, reject) => {
+        // Ack'siz kalan bir çağrı testi SESSİZCE askıda bırakmasın: yetkilendirme
+        // testinin başarısızlığı okunabilir olmalı, gizemli bir zaman aşımı değil.
+        const timer = setTimeout(
+            () => reject(new Error(`'${event}' olayı 10 sn içinde yanıtlanmadı`)),
+            10000
+        );
+        const done = (result) => { clearTimeout(timer); resolve(result); };
+        // Dikkat: payload undefined ise onu göndermeyin — socket.io son fonksiyon
+        // argümanını ack sayar ve undefined sunucuda callback parametresine düşer.
+        if (payload === undefined) socket.emit(event, done);
+        else socket.emit(event, payload, done);
     });
 }
 
