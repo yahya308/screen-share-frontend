@@ -195,3 +195,52 @@ test('sohbet hız sınırı 5 saniyede 10 mesajda durur', () => {
     assert.equal(rm.checkChatRateLimit('s1'), false, '11. mesaj engellenmeli');
     assert.equal(rm.checkChatRateLimit('s2'), true, 'başka soket etkilenmemeli');
 });
+
+// ==================== IP BAŞINA ODA LİMİTİ ====================
+
+test('aynı IP sınırsız oda açamaz', async () => {
+    const rm = freshManager();
+    const ip = '198.51.100.4';
+
+    for (let i = 0; i < 3; i++) {
+        const room = await rm.createRoom({ name: `Oda ${i}`, adminSocketId: `a${i}`, creatorIp: ip });
+        assert.ok(room.roomId, `${i}. oda açılmalıydı`);
+    }
+
+    const blocked = await rm.createRoom({ name: 'Dördüncü', adminSocketId: 'a4', creatorIp: ip });
+    assert.match(blocked.error, /en fazla 3 oda/);
+});
+
+test('oda limiti IP başına ayrışır', async () => {
+    const rm = freshManager();
+    for (let i = 0; i < 3; i++) {
+        await rm.createRoom({ name: `Oda ${i}`, adminSocketId: `a${i}`, creatorIp: '1.1.1.1' });
+    }
+
+    const other = await rm.createRoom({ name: 'Başka IP', adminSocketId: 'b1', creatorIp: '2.2.2.2' });
+    assert.ok(other.roomId, 'farklı IP etkilenmemeli');
+});
+
+test('oda kapanınca IP kotası geri gelir', async () => {
+    const rm = freshManager();
+    const ip = '198.51.100.5';
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+        const room = await rm.createRoom({ name: `Oda ${i}`, adminSocketId: `a${i}`, creatorIp: ip });
+        ids.push(room.roomId);
+    }
+    assert.equal(rm.countRoomsByIp(ip), 3);
+
+    rm.closeRoom(ids[0]);
+
+    const again = await rm.createRoom({ name: 'Yeniden', adminSocketId: 'a9', creatorIp: ip });
+    assert.ok(again.roomId);
+});
+
+test('parola doğrulaması asenkron ve doğru sonuç verir', async () => {
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'Parolalı', password: 'dogruparola', adminSocketId: ADMIN });
+
+    assert.equal((await rm.joinRoom(roomId, 'v1', 'yanlisparola', '1.1.1.1')).needPassword, true);
+    assert.equal((await rm.joinRoom(roomId, 'v1', 'dogruparola', '1.1.1.1')).success, true);
+});

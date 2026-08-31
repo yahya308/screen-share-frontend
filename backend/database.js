@@ -56,13 +56,14 @@ class RoomDatabase {
      * @param {Object} room - Room data
      * @returns {boolean} Success
      */
-    createRoom({ id, name, password, adminSocketId, workerIndex, maxUsers }) {
+    async createRoom({ id, name, password, adminSocketId, workerIndex, maxUsers }) {
         const stmt = this.db.prepare(`
             INSERT INTO rooms (id, name, password_hash, admin_socket_id, worker_index, max_users, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
 
-        const passwordHash = password ? bcrypt.hashSync(password, BCRYPT_ROUNDS) : null;
+        // bcrypt.hashSync olay döngüsünü ~100 ms bloke ediyordu (bkz. verifyPassword)
+        const passwordHash = password ? await bcrypt.hash(password, BCRYPT_ROUNDS) : null;
 
         try {
             stmt.run(id, name, passwordHash, adminSocketId, workerIndex, maxUsers || 100, Date.now());
@@ -151,14 +152,20 @@ class RoomDatabase {
 
     /**
      * Verify room password
-     * @returns {boolean} Password correct
+     *
+     * ASENKRON: bcrypt 10 tur tipik bir vCPU'da 60-100 ms sürer ve senkron
+     * sürümü boyunca Node'un TEK olay döngüsü tamamen bloke olur. Saniyede
+     * 10 parola denemesi, sadece o odayı değil TÜM odaların sinyalleşmesini
+     * (transport kurma, consume, sohbet, kullanıcı listesi) dondururdu.
+     *
+     * @returns {Promise<boolean>} Password correct
      */
-    verifyPassword(roomId, password) {
+    async verifyPassword(roomId, password) {
         const room = this.getRoom(roomId);
         if (!room) return false;
         if (!room.password_hash) return true; // Public room
 
-        return bcrypt.compareSync(password, room.password_hash);
+        return bcrypt.compare(password, room.password_hash);
     }
 
     /**

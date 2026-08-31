@@ -15,12 +15,28 @@ const WorkerManager = require('./WorkerManager');
 const RoomManager = require('./RoomManager');
 const database = require('./database');
 const rateLimiter = require('./RateLimiter');
+const EventLimiter = require('./EventLimiter');
 const { getClientIp } = require('./clientIp');
+
+// IP başına oda oluşturma hızı ve soket başına lobi sorgusu hızı.
+const CREATE_ROOM_MAX = parseInt(process.env.CREATE_ROOM_MAX, 10) > 0
+    ? parseInt(process.env.CREATE_ROOM_MAX, 10) : 5;
+const createRoomLimiter = new EventLimiter(CREATE_ROOM_MAX, 10 * 60 * 1000);
+const listRoomsLimiter = new EventLimiter(30, 60 * 1000);
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map(o => o.trim())
     .filter(Boolean);
+
+// Üretimde izin listesi boşsa açılışta dur. Eskiden sessizce origin:'*'a
+// düşülüyordu: yanlış yazılmış tek bir ortam değişkeni, sinyalleşme sunucusunu
+// herhangi bir web sitesinin gömebileceği hale getiriyordu.
+if (process.env.NODE_ENV === 'production' && !allowedOrigins.length) {
+    console.error('❌ ALLOWED_ORIGINS tanımsız. Üretimde CORS açık bırakılamaz.');
+    console.error('   Örnek: ALLOWED_ORIGINS=https://velostream.com.tr,https://www.velostream.com.tr');
+    process.exit(1);
+}
 
 const corsOptions = allowedOrigins.length
     ? { origin: allowedOrigins, methods: ['GET', 'POST'], credentials: true }
@@ -100,14 +116,21 @@ io.on('connection', (socket) => {
 
     socket.on('get-rooms', (callback) => {
         if (typeof callback !== 'function') return;
+        if (!listRoomsLimiter.consume(socket.id).allowed) { callback([]); return; }
         callback(roomManager.getAllRooms());
     });
 
     socket.on('create-room', async ({ name, password, maxUsers }, callback) => {
         if (typeof callback !== 'function') return;
 
+        const quota = createRoomLimiter.consume(clientIp || socket.id);
+        if (!quota.allowed) {
+            callback({ error: `Çok sık oda açıyorsunuz. ${quota.retryAfter} saniye sonra tekrar deneyin.` });
+            return;
+        }
+
         const result = await roomManager.createRoom({
-            name, password, adminSocketId: socket.id, maxUsers
+            name, password, adminSocketId: socket.id, maxUsers, creatorIp: clientIp
         });
 
         if (result.error) { callback({ error: result.error }); return; }
@@ -957,4 +980,8 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, server, io, start, stop, getRoomManager: () => roomManager };
+module.exports = {
+    app, server, io, start, stop,
+    getRoomManager: () => roomManager,
+    limiters: { createRoom: createRoomLimiter, listRooms: listRoomsLimiter }
+};

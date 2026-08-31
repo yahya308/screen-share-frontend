@@ -7,6 +7,11 @@ const database = require('./database');
 const adminAuth = require('./adminAuth');
 
 const MAX_ROOMS = 50;
+// IP başına eşzamanlı oda ve oluşturma hızı: 50 odalık sunucu kotasının tek
+// bir istemci tarafından doldurulmasını engeller.
+const MAX_ROOMS_PER_IP = parseInt(process.env.MAX_ROOMS_PER_IP, 10) > 0
+    ? parseInt(process.env.MAX_ROOMS_PER_IP, 10)
+    : 3;
 const PIPE_THRESHOLD = 100;
 const ADMIN_GRACE_PERIOD = 5000;
 
@@ -183,7 +188,7 @@ class RoomManager {
 
     // ==================== ROOM CRUD ====================
 
-    async createRoom({ name, password, adminSocketId, maxUsers }) {
+    async createRoom({ name, password, adminSocketId, maxUsers, creatorIp = '' }) {
         const roomName = (name || '').trim();
         if (roomName.length < ROOM_NAME_MIN || roomName.length > ROOM_NAME_MAX) {
             return { error: `Oda adı ${ROOM_NAME_MIN}-${ROOM_NAME_MAX} karakter olmalı` };
@@ -200,14 +205,18 @@ class RoomManager {
         }
 
         if (database.getRoomCount() >= MAX_ROOMS) {
-            return { error: 'Sunucu oda limitine ulaştı (50)' };
+            return { error: `Sunucu oda limitine ulaştı (${MAX_ROOMS})` };
+        }
+
+        if (creatorIp && this.countRoomsByIp(creatorIp) >= MAX_ROOMS_PER_IP) {
+            return { error: `Aynı anda en fazla ${MAX_ROOMS_PER_IP} oda açabilirsiniz` };
         }
 
         const roomId = uuidv4();
         const { index: workerIndex } = this.workerManager.getLeastLoadedWorker();
         const router = await this.workerManager.createRouter(workerIndex, roomId);
 
-        const success = database.createRoom({
+        const success = await database.createRoom({
             id: roomId,
             name: roomName,
             password: passwordValue || null,
@@ -235,6 +244,7 @@ class RoomManager {
             isStreaming: false,
             adminJoined: false,
             adminToken,
+            creatorIp,
             viewerMicEnabled: true,   // Can viewers use mic?
             chatEnabled: true          // Is chat open?
         });
@@ -244,6 +254,16 @@ class RoomManager {
 
         console.log(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
         return { roomId, workerIndex, isPublic: !password, adminToken };
+    }
+
+    /** Bu IP'nin şu anda açık kaç odası var? */
+    countRoomsByIp(ip) {
+        if (!ip) return 0;
+        let count = 0;
+        for (const [, roomState] of this.rooms) {
+            if (roomState.creatorIp === ip) count++;
+        }
+        return count;
     }
 
     // ==================== ADMIN TOKEN ====================
@@ -300,7 +320,7 @@ class RoomManager {
         // Password check
         const passwordValue = (password || '').trim();
         if (room.password_hash && passwordValue) {
-            if (!database.verifyPassword(roomId, passwordValue)) {
+            if (!await database.verifyPassword(roomId, passwordValue)) {
                 return { error: 'Yanlış şifre', needPassword: true };
             }
         } else if (room.password_hash && !passwordValue) {

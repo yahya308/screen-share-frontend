@@ -8,6 +8,10 @@
 
 process.env.ROOMS_DB_PATH = ':memory:';
 process.env.MEDIASOUP_WORKERS = '1';
+// Bu dosya tek IP'den (127.0.0.1) çok sayıda oda açar; DoS limitleri burada
+// ölçülmüyor (bkz. roomManager/eventLimiter testleri) ve yolu tıkamamalı.
+process.env.MAX_ROOMS_PER_IP = '100';
+process.env.CREATE_ROOM_MAX = '500';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
