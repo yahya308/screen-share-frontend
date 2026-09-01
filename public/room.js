@@ -9,7 +9,6 @@ import { Device } from 'mediasoup-client';
 
 const urlParams = new URLSearchParams(window.location.search);
 const roomId = urlParams.get('roomId');
-const isAdminMode = urlParams.get('admin') === 'true';
 
 if (!roomId) window.location.href = 'index.html';
 
@@ -25,6 +24,16 @@ function clearAdminToken() {
     try { sessionStorage.removeItem(ADMIN_TOKEN_KEY); }
     catch { /* depolama kapalı olabilir */ }
 }
+
+// Yönetici modunu URL DEĞİL, sırrın kendisi belirler.
+//
+// Önceden yalnızca `?admin=true` sorgusuna bakılıyordu. O parametre yolda
+// düşerse — temiz URL yönlendirmesi, kopyalanırken kırpılan bir bağlantı,
+// sekme geri yükleme — oda sahibi kendi odasına İZLEYİCİ olarak giriyordu.
+// Token zaten yetkinin tek kanıtı; modun da tek kaynağı o olmalı. Sorgu
+// parametresi yalnızca "yönetici olmayı bekliyordum" niyetini taşıyor.
+const wantsAdmin = urlParams.get('admin') === 'true';
+const isAdminMode = !!readAdminToken();
 
 // ==================== STATE ====================
 
@@ -262,14 +271,9 @@ async function initSocket(nickname) {
         mySocketId = socket.id;
         console.log('Connected:', socket.id);
 
-        if (isAdminMode) {
-            const adminToken = readAdminToken();
-            if (!adminToken) {
-                showToast('Yönetici oturumu bulunamadı, lobiye dönülüyor', 'warning');
-                setTimeout(() => window.location.href = 'index.html', 1500);
-                return;
-            }
+        const adminToken = readAdminToken();
 
+        if (isAdminMode && adminToken) {
             socket.emit('admin-rejoin', { roomId, nickname, adminToken }, async (result) => {
                 if (result.error) {
                     if (result.forbidden) {
@@ -2386,13 +2390,11 @@ btnConfirmLeave?.addEventListener('click', () => {
         }
     } catch (e) { /* yoksay */ }
 
-    // Yönetici sırrı olmadan yönetici moduna girilmez. Kontrolü takma ad
-    // sorulmadan ÖNCE yapıyoruz: aksi halde bağlantısı zaten reddedilecek bir
-    // ziyaretçiye önce form doldurtmuş oluruz.
-    if (isAdminMode && !readAdminToken()) {
-        showToast('Bu oda için yönetici oturumunuz yok, lobiye dönülüyor', 'warning', 4000);
-        setTimeout(() => { window.location.href = 'index.html'; }, 1800);
-        return;
+    // Yönetici bağlantısı paylaşılmış ya da sekmede sır yoksa: lobiye geri
+    // atmak yerine izleyici olarak devam et. Yetki zaten token'a bağlı,
+    // dolayısıyla bu yalnızca bir bilgilendirme.
+    if (wantsAdmin && !isAdminMode) {
+        showToast('Bu sekmede odanın yönetici oturumu yok — izleyici olarak katılıyorsunuz', 'warning', 5000);
     }
 
     initMicNoiseSuppressionControls();

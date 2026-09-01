@@ -105,12 +105,20 @@ function check(name, ok, detail = '') {
     await attacker.addInitScript(() => { try { sessionStorage.clear(); } catch (e) { /* yoksay */ } });
     await attacker.goto(`${BASE}/room.html?roomId=${roomId}&admin=true`, { waitUntil: 'domcontentloaded' });
 
-    let redirected = false;
-    try {
-        await attacker.waitForURL(/index\.html$/, { timeout: 12000 });
-        redirected = true;
-    } catch (e) { /* aşağıda raporlanır */ }
-    check('token\'sız ?admin=true lobiye geri atıldı', redirected, attacker.url());
+    await attacker.waitForTimeout(2500);
+
+    // Artık lobiye geri atmıyoruz: yetkisiz ziyaretçi izleyici olarak devam
+    // ediyor. Güvenlik iddiası aynı ve daha doğrudan — yönetici arayüzü
+    // AÇILMAMALI.
+    const attackerStartVisible = await attacker.isVisible('#btnStartStream').catch(() => false);
+    const attackerPanelHidden = await attacker.evaluate(
+        () => document.getElementById('adminPanel')?.classList.contains('hidden')
+    );
+    check(
+        'token\'sız ?admin=true yönetici arayüzünü açmıyor',
+        attackerStartVisible === false && attackerPanelHidden === true,
+        `başlatBtnGörünür=${attackerStartVisible} panelGizli=${attackerPanelHidden}`
+    );
 
     // ---------- 5. İzleyici akışı ----------
     const viewer = await context.newPage();
@@ -131,7 +139,17 @@ function check(name, ok, detail = '') {
     const kickBtn = await page.locator('#userListContainer button[data-action="kick"]').count();
     check('moderasyon butonları satır içi onclick olmadan üretildi', kickBtn === 1);
 
-    // ---------- 6. Sonuç ----------
+    // ---------- 6. Sorgu parametresi olmadan yönetici ----------
+    // Bildirilen üretim hatası: oda oluşturunca yönetici yerine izleyici tarafı
+    // açılıyordu. Yönetici modu artık URL'e değil token'a bağlı; `?admin=true`
+    // hiç olmasa bile sekmede sır varsa yönetici arayüzü açılmalı.
+    await page.goto(`${BASE}/room.html?roomId=${roomId}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+
+    const adminWithoutFlag = await page.isVisible('#btnStartStream').catch(() => false);
+    check('token varken ?admin=true olmadan da yönetici açılıyor', adminWithoutFlag === true);
+
+    // ---------- 7. Sonuç ----------
     console.log('\nDış kaynak isteği:', externalRequests.length ? externalRequests.join(', ') : 'yok');
     console.log('Başarısız istek  :', failedRequests.length ? failedRequests.join(', ') : 'yok');
     console.log('Konsol hataları  :', errors.length ? errors.slice(0, 5).join(' | ') : 'yok');
