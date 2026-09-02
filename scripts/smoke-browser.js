@@ -51,6 +51,17 @@ async function captureRtcStats(target) {
         window.RTCPeerConnection.prototype = Orig.prototype;
         Object.setPrototypeOf(window.RTCPeerConnection, Orig);
 
+        /** Opus payload type'ı için `a=rtcp-fb:<pt> nack` satırı var mı? */
+        window.__opusHasNack = () => {
+            const sdps = pcs.map(pc => (pc.localDescription?.sdp || '') + '\n' + (pc.remoteDescription?.sdp || ''));
+            for (const sdp of sdps) {
+                const pt = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)?.[1];
+                if (!pt) continue;
+                if (new RegExp(`a=rtcp-fb:${pt} nack\\s*$`, 'm').test(sdp)) return true;
+            }
+            return false;
+        };
+
         window.__rtcStats = async (type, kind) => {
             const total = { framesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
             for (const pc of pcs) {
@@ -227,6 +238,18 @@ async function captureRtcStats(target) {
             ctx.fillText('F' + f, 40, 180);
         }, 100);
         const stream = cv.captureStream(30);
+
+        // Sistem sesi yolunu da gerçekten çalıştır: ses üretilmezse SDP'de hiç
+        // Opus m-line'ı olmaz ve NACK kontrolleri sessizce anlamsızlaşır.
+        const ac = new AudioContext();
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        gain.gain.value = 0.1;
+        const dest = ac.createMediaStreamDestination();
+        osc.connect(gain).connect(dest);
+        osc.start();
+        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+
         navigator.mediaDevices.getDisplayMedia = async () => stream;
     });
 
@@ -256,6 +279,12 @@ async function captureRtcStats(target) {
         viewerVideo.readyState >= 2 && viewerVideo.width > 0,
         `readyState=${viewerVideo.readyState} genişlik=${viewerVideo.width}`
     );
+
+    // Opus NACK iki yönde de açık mı? mediasoup-client `opusNack` verilmezse
+    // gönderme SDP'sinden, mediasoup ise `enableRtx` verilmezse ses consumer'ından
+    // NACK'i siliyor. İkisi de sessiz: ses cızırdar, kimse sebebini bilmez.
+    check('yayıncı SDP\'sinde Opus NACK açık', await page.evaluate(() => window.__opusHasNack()) === true);
+    check('izleyici SDP\'sinde Opus NACK açık', await viewer.evaluate(() => window.__opusHasNack()) === true);
 
     // ---------- 7. Sorgu parametresi olmadan yönetici ----------
     // Bildirilen üretim hatası: oda oluşturunca yönetici yerine izleyici tarafı

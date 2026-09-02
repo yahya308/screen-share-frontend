@@ -1435,10 +1435,18 @@ async function startStream() {
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
             systemAudioTrack = audioTrack;
-            // DTX kapalı (B3) — sistem sesinde (müzik/film) DTX kaliteyi bozar
+            // DTX kapalı (B3) — sistem sesinde (müzik/film) DTX kaliteyi bozar.
+            //
+            // opusNack: kaybolan ses paketi yeniden istenir. mediasoup-client,
+            // bu seçenek verilmezse Opus'tan NACK desteğini SDP'den SİLİYOR
+            // (bkz. MediaSection.js "If opusNack is not set..."), yani şimdiye
+            // kadar tek bir kayıp paket kalıcı bir cızırtıydı. Inband FEC yalnızca
+            // tek tük kaybı kapatıyor; ardışık kayıpları bu kapatır.
+            //
+            // SADECE SESİ etkiler; video kodlayıcısına dokunmaz.
             systemAudioProducer = await producerTransport.produce({
                 track: systemAudioTrack,
-                codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+                codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 128000 },
                 appData: { source: 'admin-sys-audio' }
             });
             updateAdminAudioButton(true);
@@ -1550,7 +1558,7 @@ async function republishAdminMicUnlocked() {
     try {
         micProducer = await adminMicTransport.produce({
             track: micTrack,
-            codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 64000 },
+            codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 64000 },
             appData: { source: 'admin-mic' }
         });
         micProducer.on('transportclose', () => { micProducer = null; });
@@ -1775,7 +1783,7 @@ async function republishSystemAudio() {
     try {
         systemAudioProducer = await producerTransport.produce({
             track: systemAudioTrack,
-            codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+            codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 128000 },
             appData: { source: 'admin-sys-audio' }
         });
         console.log('🔊 System audio producer:', systemAudioProducer.id);
@@ -1943,6 +1951,7 @@ async function openViewerMicUnlocked() {
                 opusStereo: 0,
                 opusFec: 1,
                 opusDtx: 0,                      // B3: DTX kapalı — gürültü/kesik yok
+                opusNack: 1,                     // kaybolan ses paketi yeniden istensin
                 opusMaxAverageBitrate: 64000     // 64kbps voice (netlik için 48→64)
             },
             appData: { source: 'viewer-mic' }
@@ -1985,6 +1994,7 @@ async function republishViewerMic() {
             opusStereo: 0,
             opusFec: 1,
             opusDtx: 0,
+            opusNack: 1,
             opusMaxAverageBitrate: 64000
         },
         appData: { source: 'viewer-mic' }

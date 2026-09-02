@@ -760,7 +760,22 @@ io.on('connection', (socket) => {
             const transport = findTransport(roomState, transportId);
             if (!transport) { callback({ params: { error: 'Transport bulunamadı' } }); return; }
 
-            const consumer = await transport.consume({ producerId, rtpCapabilities, paused: true });
+            // enableRtx: mediasoup bunu vermezsen video için true, SES İÇİN FALSE
+            // varsayıyor ve consumer'ın Opus codec'inden düz 'nack' geri
+            // bildirimini siliyor (ortc.getConsumerRtpParameters). Sonuç: yayıncı
+            // NACK'i açsa bile SFU→izleyici yönünde kayıp ses paketi hiç yeniden
+            // istenmiyordu.
+            //
+            // Video davranışı DEĞİŞMEZ: mediasoup video için zaten true
+            // varsayıyordu, burada yalnızca açıkça yazıyoruz. Ses için de RTX
+            // akışı açılmaz (mediasoup RTX codec'ini yalnızca video için üretir);
+            // tek etkisi NACK'in korunması.
+            const consumer = await transport.consume({
+                producerId,
+                rtpCapabilities,
+                paused: true,
+                enableRtx: true
+            });
 
             if (consumer.kind === 'audio') await consumer.setPriority(255).catch(() => {});
             else if (consumer.kind === 'video') await consumer.setPriority(200).catch(() => {});
