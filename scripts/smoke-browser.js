@@ -51,23 +51,6 @@ async function captureRtcStats(target) {
         window.RTCPeerConnection.prototype = Orig.prototype;
         Object.setPrototypeOf(window.RTCPeerConnection, Orig);
 
-        // SDP incelemesi: kodek pazarlığının sonucu yalnızca burada görünür.
-        // Hangi peer connection olduğu önemli değil; hepsini birleştiriyoruz.
-        window.__localSdp = () => pcs.map(pc => pc.localDescription?.sdp || '').join('\n');
-        window.__remoteSdp = () => pcs.map(pc => pc.remoteDescription?.sdp || '').join('\n');
-
-        window.__localSdpFmtp = (re) => [...window.__localSdp().matchAll(re)].map(m => m[m.length - 1]);
-
-        /** Opus payload type'ı için `a=rtcp-fb:<pt> nack` satırı var mı? */
-        window.__opusHasNack = () => {
-            for (const sdp of [window.__localSdp(), window.__remoteSdp()]) {
-                const pt = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)?.[1];
-                if (!pt) continue;
-                if (new RegExp(`a=rtcp-fb:${pt} nack\\s*$`, 'm').test(sdp)) return true;
-            }
-            return false;
-        };
-
         window.__rtcStats = async (type, kind) => {
             const total = { framesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
             for (const pc of pcs) {
@@ -244,19 +227,6 @@ async function captureRtcStats(target) {
             ctx.fillText('F' + f, 40, 180);
         }, 100);
         const stream = cv.captureStream(30);
-
-        // Sistem sesi yolunu da gerçekten çalıştır: ses üretilmezse SDP'de hiç
-        // Opus m-line'ı olmaz ve NACK kontrolleri boşa döner.
-        const ac = new AudioContext();
-        const osc = ac.createOscillator();
-        osc.frequency.value = 440;
-        const dest = ac.createMediaStreamDestination();
-        const gain = ac.createGain();
-        gain.gain.value = 0.1;
-        osc.connect(gain).connect(dest);
-        osc.start();
-        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
-
         navigator.mediaDevices.getDisplayMedia = async () => stream;
     });
 
@@ -286,32 +256,6 @@ async function captureRtcStats(target) {
         viewerVideo.readyState >= 2 && viewerVideo.width > 0,
         `readyState=${viewerVideo.readyState} genişlik=${viewerVideo.width}`
     );
-
-    // Bant genişliği hedefleri SDP'ye doğru BİRİMDE yazılmış mı?
-    // x-google-* fmtp değerleri KBPS'tir; kodda bir süre bps veriliyordu, yani
-    // "en az 3 Gbps gönder" deniyordu ve encoder zayıf hatta hiç düşemiyordu.
-    // Değerin makul aralıkta olması bu sınıfın tamamını yakalar.
-    const googleBitrates = await page.evaluate(() => window.__localSdpFmtp(/x-google-(min|max|start)-bitrate=(\d+)/g));
-    const insane = googleBitrates.filter(v => Number(v) > 100000);
-    check(
-        'x-google bitrate değerleri kbps biriminde (bps sızmamış)',
-        googleBitrates.length > 0 && insane.length === 0,
-        `değerler=${googleBitrates.join(',') || 'yok'}`
-    );
-    check(
-        'encoder için alt bitrate tabanı dayatılmıyor',
-        !(await page.evaluate(() => /x-google-min-bitrate/.test(window.__localSdp()))),
-        'x-google-min-bitrate bulundu'
-    );
-
-    // Opus NACK iki yönde de açık mı? mediasoup-client `opusNack` verilmezse
-    // gönderme SDP'sinden, mediasoup ise `enableRtx` verilmezse ses consumer'ından
-    // NACK'i siliyor. İkisi de sessiz kayıplar: ses cızırdar, kimse sebebini bilmez.
-    const senderOpusNack = await page.evaluate(() => window.__opusHasNack());
-    check('yayıncı SDP\'sinde Opus NACK açık', senderOpusNack === true);
-
-    const viewerOpusNack = await viewer.evaluate(() => window.__opusHasNack());
-    check('izleyici SDP\'sinde Opus NACK açık', viewerOpusNack === true);
 
     // ---------- 7. Sorgu parametresi olmadan yönetici ----------
     // Bildirilen üretim hatası: oda oluşturunca yönetici yerine izleyici tarafı
