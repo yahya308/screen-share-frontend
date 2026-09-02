@@ -7,13 +7,12 @@
     <title>VELOSTREAM - Oda</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/vendor/socket.io.min.js"></script>
-    <script type="importmap">
-        {
-            "imports": {
-                "mediasoup-client": "/vendor/mediasoup-client.esm.js"
-            }
-        }
-    </script>
+    <!-- Burada `mediasoup-client` çıplak adını /vendor/ altına eşleyen bir
+         import map vardı. Import map SATIR İÇİ bir script'tir: üretimdeki
+         `script-src 'self'` başlığı onu engelliyor, room.js çıplak adı
+         çözemiyor ve MODÜL HİÇ ÇALIŞMIYORDU — oda sahibi yönetici arayüzü
+         yerine boş izleyici ekranını görüyordu. room.js artık dosyayı
+         yolundan alıyor; satır içi script kalmadı. -->
     <style>
         :root { color-scheme: dark; }
         * { -webkit-tap-highlight-color: transparent; }

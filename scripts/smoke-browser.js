@@ -6,7 +6,12 @@
  * açıldığını göstermiyor. Bu betik, yalnızca tarayıcıda ortaya çıkan
  * kırılmaları yakalar: derlenmiş CSS uygulanmış mı, vendor ESM paketi
  * adlandırılmış dışa aktarımları veriyor mu, hiçbir dış CDN'e istek gidiyor
- * mu, ve token'sız `?admin=true` gerçekten lobiye geri atılıyor mu.
+ * mu, CSP sayfanın kendi kodunu engelliyor mu, ve token'sız `?admin=true`
+ * yönetici arayüzünü açıyor mu.
+ *
+ * Sunucu artık ön yüzü üretimdekiyle (Vercel) aynı CSP başlığıyla sunuyor;
+ * yoksa bu betik gerçekte sevk edilenden farklı bir sayfayı test eder —
+ * satır içi import map tam olarak böyle gözden kaçmıştı.
  *
  * Kullanım:
  *   cd backend && node -e "require('./server.js').start({port:3100})" &
@@ -37,12 +42,21 @@ function check(name, ok, detail = '') {
     const context = await browser.newContext();
     const errors = [];
     const failedRequests = [];
+    // CSP ihlalleri konsola "hata" olarak düşer ama diğer hatalarla karışır.
+    // Ayrı tutuyoruz: sayfanın kendi kodunun engellenmesi tek başına raporlanacak
+    // kadar önemli — engellenen bir import map room.js'i tamamen sustururken
+    // sayfa "sadece izleyici ekranı" gibi görünüyordu.
+    const cspViolations = [];
+    const noteError = (text) => {
+        errors.push(text);
+        if (/Content Security Policy/i.test(text)) cspViolations.push(text);
+    };
 
-    context.on('weberror', (e) => errors.push(String(e.error())));
+    context.on('weberror', (e) => noteError(String(e.error())));
 
     const page = await context.newPage();
-    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    page.on('pageerror', (e) => errors.push(String(e)));
+    page.on('console', (m) => { if (m.type() === 'error') noteError(m.text()); });
+    page.on('pageerror', (e) => noteError(String(e)));
     page.on('requestfailed', (r) => failedRequests.push(`${r.url()} ${r.failure()?.errorText}`));
     const notFound = [];
     context.on('response', (r) => { if (r.status() >= 400) notFound.push(`${r.status()} ${r.url()}`); });
@@ -98,6 +112,17 @@ function check(name, ok, detail = '') {
     const adminUiVisible = await page.isVisible('#btnStartStream');
     check('yönetici arayüzü açıldı', adminUiVisible);
 
+    // Bildirilen üretim hatası buydu: CSP satır içi import map'i engelliyor,
+    // room.js modülü hiç çalışmıyor ve oda sahibi yönetici paneli yerine boş
+    // izleyici ekranını görüyordu. Sayfa gerçekten CSP altında mı sunuldu ve
+    // kendi kodumuz engellendi mi — ikisini de açıkça soruyoruz.
+    const cspHeader = await page.evaluate(async () => {
+        const r = await fetch(location.pathname, { cache: 'no-store' });
+        return r.headers.get('content-security-policy') || '';
+    });
+    check('oda sayfası üretimdeki CSP ile sunuldu', /script-src 'self'/.test(cspHeader), cspHeader.slice(0, 60));
+    check('CSP sayfanın kendi kodunu engellemedi', cspViolations.length === 0, cspViolations[0] || '');
+
     // ---------- 4. GÜVENLİK: token'sız yönetici girişi ----------
     const attacker = await context.newPage();
     const attackerErrors = [];
@@ -122,7 +147,7 @@ function check(name, ok, detail = '') {
 
     // ---------- 5. İzleyici akışı ----------
     const viewer = await context.newPage();
-    viewer.on('pageerror', (e) => errors.push('viewer: ' + String(e)));
+    viewer.on('pageerror', (e) => noteError('viewer: ' + String(e)));
     await viewer.goto(`${BASE}/room.html?roomId=${roomId}`, { waitUntil: 'domcontentloaded' });
     await viewer.waitForSelector('#nicknameModal', { state: 'visible', timeout: 10000 }).catch(() => {});
     await viewer.fill('#nicknameInput', 'izleyici1').catch(() => {});
@@ -153,6 +178,7 @@ function check(name, ok, detail = '') {
     console.log('\nDış kaynak isteği:', externalRequests.length ? externalRequests.join(', ') : 'yok');
     console.log('Başarısız istek  :', failedRequests.length ? failedRequests.join(', ') : 'yok');
     console.log('Konsol hataları  :', errors.length ? errors.slice(0, 5).join(' | ') : 'yok');
+    console.log('CSP ihlali       :', cspViolations.length ? cspViolations.slice(0, 3).join(' | ') : 'yok');
     console.log('4xx/5xx yanıt    :', notFound.length ? notFound.join(', ') : 'yok');
 
     check('dış CDN\'e istek yok', externalRequests.length === 0);

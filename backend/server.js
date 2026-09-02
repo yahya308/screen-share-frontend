@@ -17,6 +17,7 @@ const database = require('./database');
 const rateLimiter = require('./RateLimiter');
 const EventLimiter = require('./EventLimiter');
 const { getClientIp } = require('./clientIp');
+const { FRONTEND_SECURITY_HEADERS } = require('./securityHeaders');
 const metrics = require('./metrics');
 const svc = require('./svcLayers');
 const log = require('./logger');
@@ -55,6 +56,17 @@ app.use(cors(corsOptions));
 // bulunmadığı için sessizce atlanır (ön yüz Vercel'de).
 const publicDir = path.join(__dirname, '..', 'public');
 if (fs.existsSync(publicDir)) {
+    // Üretimdeki başlıkların BİREBİR aynısı. Daha önce buradan CSP'siz
+    // sunuluyordu: satır içi bir script yerelde ve duman testinde sorunsuz
+    // çalışıyor, Vercel'de sessizce engelleniyordu. Ön yüzü iki farklı
+    // güvenlik politikasıyla test etmek, üretimde ne kırıldığını görmemek
+    // demek — o yüzden aynı politikayı burada da uyguluyoruz.
+    app.use((req, res, next) => {
+        for (const [key, value] of Object.entries(FRONTEND_SECURITY_HEADERS)) {
+            res.setHeader(key, value);
+        }
+        next();
+    });
     app.use(express.static(publicDir));
 }
 

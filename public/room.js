@@ -3,7 +3,10 @@
  * Features: nickname, user list, chat, viewer mic (VAD), moderasyon (kick/ban)
  */
 
-import { Device } from 'mediasoup-client';
+// Çıplak ad ('mediasoup-client') değil, gerçek yol. Çıplak adı çözmek satır içi
+// bir import map gerektiriyordu; onu da üretimdeki `script-src 'self'` engelliyor
+// ve bu modül hiç çalışmıyordu (bkz. room.html'deki not).
+import { Device } from '/vendor/mediasoup-client.esm.js';
 
 // ==================== URL PARAMS ====================
 
