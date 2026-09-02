@@ -1344,6 +1344,12 @@ function stopStreamTimer() {
 /**
  * Kalite preset'leri — çözünürlük + FPS + bitrate'i birlikte ayarlar
  */
+// Hedef ne olursa olsun yayının başlayacağı üst sınır (kbps). Bant genişliği
+// kestirimi ilk saniyelerde henüz gerçeği bilmiyor; yukarıdan başlayıp düşmek
+// zayıf hatta kırık görüntü demek, aşağıdan başlayıp çıkmak ise birkaç saniye
+// yumuşak açılış.
+const VIDEO_START_BITRATE_KBPS = 1000;
+
 const QUALITY_PRESETS = {
     low:    { res: '480',  fps: '24', bitrate: '1500',  label: 'Düşük' },
     medium: { res: '720',  fps: '30', bitrate: '3500',  label: 'Orta' },
@@ -1351,12 +1357,28 @@ const QUALITY_PRESETS = {
     ultra:  { res: '1080', fps: '60', bitrate: '10000', label: 'Ultra' }
 };
 
+/** Gelişmiş ayarlardaki bitrate alanını güvenle oku (kbps). */
+function readBitrateKbps() {
+    const parsed = parseInt(bitrateInput?.value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return parseInt(QUALITY_PRESETS.high.bitrate, 10);
+    return Math.min(parsed, 50000);
+}
+
 function applyPreset(preset) {
     const p = QUALITY_PRESETS[preset];
     if (!p) return;
     if (resSelect) resSelect.value = p.res;
     if (fpsSelect) fpsSelect.value = p.fps;
     if (bitrateInput) bitrateInput.value = p.bitrate;
+
+    // Kullanıcının seçimi otomatik uyarlamanın tavanı olur: hattı düzelince
+    // buraya kadar geri çıkabiliriz, üstüne çıkamayız.
+    sendQualityCeiling = preset;
+    degradeSamples = upgradeSamples = 0;
+    if (sendQualityLevel) {
+        sendQualityLevel = preset;
+        applyEncoderTarget(parseInt(p.bitrate, 10), parseInt(p.fps, 10));
+    }
     // Aktif preset görselini güncelle
     presetButtons.forEach(btn => {
         btn.classList.toggle('preset-active', btn.dataset.preset === preset);
@@ -1396,10 +1418,11 @@ async function startStream() {
         systemAudioTrack = null;
     }
 
-    const height  = parseInt(resSelect.value);
-    const fps     = parseInt(fpsSelect.value);
-    const bitrate = parseInt(bitrateInput.value) * 1000;
-    const width   = Math.round(height * (16 / 9));
+    const height      = parseInt(resSelect.value);
+    const fps         = parseInt(fpsSelect.value);
+    const bitrateKbps = readBitrateKbps();
+    const bitrate     = bitrateKbps * 1000;   // encodings.maxBitrate BPS ister
+    const width       = Math.round(height * (16 / 9));
 
     try {
         await createSendTransportAsync();
@@ -1422,10 +1445,18 @@ async function startStream() {
             track: videoTrack,
             encodings: [{ maxBitrate: bitrate, maxFramerate: actualFps, scalabilityMode }],
             codec: codec || undefined,
+            // DİKKAT: encodings.maxBitrate BPS, x-google-* fmtp değerleri KBPS.
+            // Eskiden üçüne de bps veriliyordu; x-google-min-bitrate=3000000
+            // "3 Gbps'in altına inme" demekti. Üstelik taban hedefin %60'ıydı:
+            // yükleme hızı hedefin altındaki yayıncıda encoder düşemiyor,
+            // kaliteyi koruyup paket kaybetmeyi seçiyordu — donmanın sebebi bu.
+            //
+            // Taban artık hiç verilmiyor: tarayıcı kendi alt sınırına kadar
+            // inebilsin. Başlangıç da hedefin %80'i değil sabit bir tavanla
+            // sınırlı; zayıf hatta ilk saniyelerde patlamasın.
             codecOptions: {
-                videoGoogleStartBitrate: Math.floor(bitrate * 0.8),
-                videoGoogleMaxBitrate: bitrate,
-                videoGoogleMinBitrate: Math.floor(bitrate * 0.6) // Keep resolution high
+                videoGoogleStartBitrate: Math.min(bitrateKbps, VIDEO_START_BITRATE_KBPS),
+                videoGoogleMaxBitrate: bitrateKbps
             },
             appData: { source: 'screen', resolution: actualH }
         });
@@ -1435,10 +1466,17 @@ async function startStream() {
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
             systemAudioTrack = audioTrack;
-            // DTX kapalı (B3) — sistem sesinde (müzik/film) DTX kaliteyi bozar
+            // DTX kapalı (B3) — sistem sesinde (müzik/film) DTX kaliteyi bozar.
+            //
+            // opusNack: kaybolan ses paketi yeniden istenir. mediasoup-client,
+            // bu seçenek verilmezse Opus'tan NACK desteğini SDP'den SİLİYOR
+            // (bkz. MediaSection.js "If opusNack is not set..."), yani şimdiye
+            // kadar tek bir kayıp paket kalıcı bir cızırtıydı. Ses akışı küçük
+            // olduğu için yeniden gönderim düşük hızlı hatta bile ucuz;
+            // inband FEC'in yakalayamadığı ardışık kayıpları bu kapatıyor.
             systemAudioProducer = await producerTransport.produce({
                 track: systemAudioTrack,
-                codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+                codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 128000 },
                 appData: { source: 'admin-sys-audio' }
             });
             updateAdminAudioButton(true);
@@ -1448,6 +1486,7 @@ async function startStream() {
             btnStopStream.classList.remove('hidden');
             showToast('Yayın başlandı', 'success');
             warnIfEncoderStalled();
+            resetSendQuality();
             startStatsLoop(true);
             statsStarted = true;
             startStreamTimer();
@@ -1514,6 +1553,8 @@ function stopStream() {
 
     if (systemAudioTrack) { systemAudioTrack.stop(); systemAudioTrack = null; }
 
+    sendQualityLevel = null;   // yayın yokken uyarlama çalışmasın
+
     if (localVideo.srcObject) {
         localVideo.srcObject.getTracks().forEach(t => t.stop());
         localVideo.srcObject = null;
@@ -1550,7 +1591,7 @@ async function republishAdminMicUnlocked() {
     try {
         micProducer = await adminMicTransport.produce({
             track: micTrack,
-            codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 64000 },
+            codecOptions: { opusStereo: 0, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 64000 },
             appData: { source: 'admin-mic' }
         });
         micProducer.on('transportclose', () => { micProducer = null; });
@@ -1775,7 +1816,7 @@ async function republishSystemAudio() {
     try {
         systemAudioProducer = await producerTransport.produce({
             track: systemAudioTrack,
-            codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusMaxAverageBitrate: 128000 },
+            codecOptions: { opusStereo: 1, opusFec: 1, opusDtx: 0, opusNack: 1, opusMaxAverageBitrate: 128000 },
             appData: { source: 'admin-sys-audio' }
         });
         console.log('🔊 System audio producer:', systemAudioProducer.id);
@@ -1943,6 +1984,7 @@ async function openViewerMicUnlocked() {
                 opusStereo: 0,
                 opusFec: 1,
                 opusDtx: 0,                      // B3: DTX kapalı — gürültü/kesik yok
+                opusNack: 1,                     // kaybolan ses paketi yeniden istensin
                 opusMaxAverageBitrate: 64000     // 64kbps voice (netlik için 48→64)
             },
             appData: { source: 'viewer-mic' }
@@ -1985,6 +2027,7 @@ async function republishViewerMic() {
             opusStereo: 0,
             opusFec: 1,
             opusDtx: 0,
+            opusNack: 1,
             opusMaxAverageBitrate: 64000
         },
         appData: { source: 'viewer-mic' }
@@ -2227,6 +2270,8 @@ function startStatsLoop(isSender) {
             // Ses metrikleri
             let audioBytes = 0, audioPacketsLost = 0, audioPacketsTotal = 0, audioJitter = 0;
 
+            let limitationReason = null;
+
             stats.forEach((report) => {
                 const type = isSender ? 'outbound-rtp' : 'inbound-rtp';
                 if (report.type === type && report.kind === 'video') {
@@ -2235,6 +2280,7 @@ function startStatsLoop(isSender) {
                     packetsLost = report.packetsLost || packetsLost;
                     packetsTotal = (report.packetsLost || 0) + (report.packetsReceived || 0);
                     jitter = report.jitter || jitter;
+                    if (report.qualityLimitationReason) limitationReason = report.qualityLimitationReason;
                 }
                 // V8: Ses metriklerini de topla
                 if (report.type === type && report.kind === 'audio') {
@@ -2284,10 +2330,23 @@ function startStatsLoop(isSender) {
             const videoLossPct = packetsTotal ? (packetsLost / packetsTotal) * 100 : 0;
             const now2 = Date.now();
 
+            // Yayıncıysak kodlayıcının neden kısıtlandığını da hesaba kat ve
+            // gerekiyorsa hedefi düşür (kapalı döngü — aşağıya bkz.).
+            if (isSender) adaptSendQuality(limitationReason, bitrateKbps);
+
             // Bağlantı kalitesi göstergesi (header)
             if (connDot && connText) {
                 const rttMs = rtt ? Math.round(rtt * 1000) : 0;
-                if (videoLossPct > 5 || rttMs > 300) {
+                // Kodlayıcı bant genişliği yüzünden kısıtlanıyorsa kayıp/RTT
+                // henüz kötü görünmese bile bağlantı "iyi" değildir: kullanıcı
+                // görüntünün neden bulanıklaştığını buradan anlasın.
+                if (limitationReason === 'bandwidth') {
+                    connDot.className = "w-2 h-2 rounded-full conn-poor";
+                    connText.textContent = "Yükleme yetersiz";
+                } else if (limitationReason === 'cpu') {
+                    connDot.className = "w-2 h-2 rounded-full conn-good";
+                    connText.textContent = "İşlemci zorlanıyor";
+                } else if (videoLossPct > 5 || rttMs > 300) {
                     connDot.className = "w-2 h-2 rounded-full conn-poor";
                     connText.textContent = "Zayıf";
                 } else if (videoLossPct > 2 || rttMs > 150) {
@@ -2305,6 +2364,122 @@ function startStatsLoop(isSender) {
             }
         } catch (e) { /* yoksay */ }
     }, 2000);
+}
+
+// ============ OTOMATİK KALİTE (GÖNDERME TARAFI, KAPALI DÖNGÜ) ============
+//
+// İstatistikler zaten toplanıyordu ama yalnızca ekrana yazılıyordu: hiçbir
+// karar onlara bağlı değildi. Yayıncının yükleme hızı hedefin altındaysa
+// tarayıcı çözünürlüğü/kare hızını kendi düşürür, ama hedef ulaşılamaz
+// kaldığı sürece sürekli o hedefe tırmanmayı dener — bu da dalgalı, donma
+// eğilimli bir görüntü demek. Burada hedefi ölçülen gerçeğe indiriyoruz.
+//
+// Yön asimetrik: düşüş hızlı (~6 sn), yükseliş yavaş (~60 sn). Simetrik
+// olsaydı sınırdaki bir bağlantıda kalite sürekli gidip gelirdi.
+
+const PRESET_LADDER = ['low', 'medium', 'high', 'ultra'];
+const DEGRADE_SAMPLES = 3;    // 2 sn'lik örnek → ~6 sn
+const UPGRADE_SAMPLES = 30;   // ~60 sn
+
+let sendQualityCeiling = 'high';   // kullanıcının seçtiği üst sınır
+let sendQualityLevel   = null;     // yürürlükteki seviye (null: yayın yok)
+let degradeSamples     = 0;
+let upgradeSamples     = 0;
+
+/** Yayın başlarken uyarlamayı kullanıcının seçtiği seviyeden başlat. */
+function resetSendQuality() {
+    const fromInputs = PRESET_LADDER.find(name => {
+        const p = QUALITY_PRESETS[name];
+        return p.res === resSelect?.value && p.fps === fpsSelect?.value && p.bitrate === bitrateInput?.value;
+    });
+    // Ayarlar elle değiştirilmişse merdivende yerimiz yok: uyarlamayı kapat,
+    // kullanıcının girdiği değerlerle oynamayalım.
+    sendQualityLevel = fromInputs || null;
+    sendQualityCeiling = fromInputs || sendQualityCeiling;
+    degradeSamples = upgradeSamples = 0;
+}
+
+/**
+ * Kodlayıcının bildirdiği kısıtlama nedenine göre hedefi bir kademe indir/çıkar.
+ * @param {string|null} reason outbound-rtp.qualityLimitationReason
+ * @param {number} achievedKbps son 2 saniyede gerçekten gönderilen bitrate
+ */
+function adaptSendQuality(reason, achievedKbps) {
+    if (!sendQualityLevel || !videoProducer || videoProducer.closed) return;
+
+    const limited = reason === 'bandwidth' || reason === 'cpu';
+    if (limited) { degradeSamples++; upgradeSamples = 0; }
+    else { upgradeSamples++; degradeSamples = 0; }
+
+    const index = PRESET_LADDER.indexOf(sendQualityLevel);
+
+    if (degradeSamples >= DEGRADE_SAMPLES && index > 0) {
+        applySendQualityLevel(PRESET_LADDER[index - 1], reason);
+        return;
+    }
+
+    // Yükselme yalnızca hat gerçekten boşsa: kısıtlama yok VE mevcut hedefin
+    // en az %85'i fiilen gönderilebiliyor. İkincisi olmadan, kodlayıcı hedefe
+    // hiç ulaşamadığı hâlde "kısıtlama yok" dediği durumlarda yukarı tırmanırdık.
+    if (upgradeSamples >= UPGRADE_SAMPLES && index >= 0 && index < PRESET_LADDER.indexOf(sendQualityCeiling)) {
+        const target = parseInt(QUALITY_PRESETS[sendQualityLevel].bitrate, 10);
+        if (achievedKbps >= target * 0.85) applySendQualityLevel(PRESET_LADDER[index + 1], null);
+    }
+}
+
+function applySendQualityLevel(level, reason) {
+    const preset = QUALITY_PRESETS[level];
+    if (!preset) return;
+
+    const previous = sendQualityLevel;
+    sendQualityLevel = level;
+    degradeSamples = upgradeSamples = 0;
+
+    const applied = applyEncoderTarget(parseInt(preset.bitrate, 10), parseInt(preset.fps, 10));
+    if (!applied) return;
+
+    const down = PRESET_LADDER.indexOf(level) < PRESET_LADDER.indexOf(previous);
+    const why = reason === 'cpu' ? 'işlemci yetişemiyor' : 'yükleme hızı yetersiz';
+
+    console.info(`[oto-kalite] ${previous} → ${level} (${reason || 'hat rahatladı'})`);
+    showToast(
+        down
+            ? `Kalite ${preset.label} seviyesine düşürüldü — ${why}`
+            : `Bağlantı düzeldi, kalite ${preset.label} seviyesine çıkarıldı`,
+        down ? 'warning' : 'success',
+        6000
+    );
+}
+
+/**
+ * Canlı yayının kodlayıcı hedefini değiştir (yeniden yayın açmadan).
+ *
+ * mediasoup-client, producer oluştuktan sonra encoding parametrelerini
+ * değiştirmek için bir API sunmuyor; RTCRtpSender'a doğrudan gitmek gerekiyor.
+ * Bu, transport'un içindeki `_pc`'ye dayanıyor — kodda zaten iki yerde
+ * (jitterBufferTarget, istatistik döngüsü) aynı bağımlılık var. Erişilemezse
+ * sessizce vazgeçiyoruz: uyarlama bir iyileştirme, yayının koşulu değil.
+ *
+ * @returns {boolean} parametreler uygulanabildi mi
+ */
+function applyEncoderTarget(bitrateKbps, maxFramerate) {
+    const pc = producerTransport?.handler?._pc;
+    if (!pc) return false;
+
+    const sender = pc.getSenders?.().find(s => s.track?.kind === 'video');
+    if (!sender) return false;
+
+    try {
+        const params = sender.getParameters();
+        if (!params.encodings?.length) return false;
+        params.encodings[0].maxBitrate = bitrateKbps * 1000;
+        params.encodings[0].maxFramerate = maxFramerate;
+        void sender.setParameters(params);
+        return true;
+    } catch (e) {
+        console.warn('Kodlayıcı hedefi güncellenemedi:', e.message);
+        return false;
+    }
 }
 
 // ==================== QUALITY ====================

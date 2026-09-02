@@ -98,15 +98,26 @@ module.exports = {
                     announcedIp
                 }
             ],
-            maxIncomingBitrate: 50000000, // 50 Mbps for high quality
-            initialAvailableOutgoingBitrate: 10000000, // ⭐ 10 Mbps start for instant quality
+            // Üst sınır; bant genişliği kestirimini kısıtlamaz.
+            maxIncomingBitrate: 50000000,
+
+            // SFU'nun izleyiciye gönderirken VARSAYDIĞI başlangıç bant genişliği.
+            // 10 Mbps'ti: bağlantısı bunun altında olan izleyiciye ilk saniyelerde
+            // hattının çok üstünde veri gönderiliyor, kestirim aşağı yakınsayana
+            // kadar görüntü kırılıyordu. Düşük hızlı bağlantıda yukarıdan başlayıp
+            // düşmek, aşağıdan başlayıp çıkmaktan çok daha kötü: kayıp paket geri
+            // gelmiyor. mediasoup varsayılanı 600 kbps; 1 Mbps iyi hatta hızlı
+            // açılmak ile zayıf hatta patlamamak arasında denge.
+            initialAvailableOutgoingBitrate: 1000000,
+
             enableUdp: true,
             enableTcp: true,
-            preferUdp: true,
-            // ⭐ Smooth streaming optimizations
-            // Düşürüldü: 3 Mbps taban, zayıf/mobil bağlantıda mediasoup'un adaptive
-            // bandwidth control'üne engel oluyordu ve paket kaybına yol açıyordu.
-            minimumAvailableOutgoingBitrate: 1500000  // 1.5 Mbps taban (uyumlu adaptasyon)
+            preferUdp: true
+            // NOT: burada bir `minimumAvailableOutgoingBitrate: 1500000` vardı.
+            // mediasoup createWebRtcTransport böyle bir seçenek KABUL ETMİYOR
+            // (bkz. Router.js createWebRtcTransport imzası); değer sessizce
+            // yok sayılıyordu. Yanıltıcı olmasın diye kaldırıldı — gerçek taban
+            // artık yok, kestirim serbestçe aşağı inebiliyor.
         }
     },
 
