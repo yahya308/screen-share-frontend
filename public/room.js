@@ -1417,12 +1417,7 @@ async function startStream() {
         if (videoTrack.contentHint !== undefined) videoTrack.contentHint = 'detail';
 
         const codec = pickVideoCodec(false);
-        // VP9 SVC: 'L3T3_KEY' tek encoding'le 3 UZAMSAL + 3 zamansal katman verir.
-        // 'L1T3' yalnızca zamansal katman sunuyordu; bağlantısı zayıf izleyici
-        // 1080p almaya devam edip donuyor, sadece kare hızı düşüyordu. Artık
-        // sunucu çözünürlüğü de kademeli düşürebiliyor (bkz. backend/svcLayers.js).
-        // VP8/H264'te bu mod yok; onlar için davranış değişmiyor.
-        const scalabilityMode = pickScalabilityMode(codec);
+        const scalabilityMode = pickScalabilityMode();
         videoProducer = await producerTransport.produce({
             track: videoTrack,
             encodings: [{ maxBitrate: bitrate, maxFramerate: actualFps, scalabilityMode }],
@@ -1452,6 +1447,7 @@ async function startStream() {
             btnStartStream.classList.add('hidden');
             btnStopStream.classList.remove('hidden');
             showToast('Yayın başlandı', 'success');
+            warnIfEncoderStalled();
             startStatsLoop(true);
             statsStarted = true;
             startStreamTimer();
@@ -1463,6 +1459,44 @@ async function startStream() {
         console.error('Stream error:', err);
         showToast('Yayın başlatılamadı: ' + err.message);
     }
+}
+
+/**
+ * Kodlayıcının gerçekten kare ürettiğini yayın başladıktan sonra doğrula.
+ *
+ * Kodlayıcı sessizce durursa yayıncı bunu KENDİ ekranından anlayamaz: önizleme
+ * yerel track'i gösterir ve kusursuz görünür, "Yayını Durdur" düğmesi çıkar,
+ * sunucu hata döndürmez. Yalnızca izleyiciler siyah ekran görür ve kimse
+ * sebebini bilmez — bu hata tam olarak böyle uzun süre fark edilmedi. Burada
+ * tek yaptığımız o sessiz durumu yayıncıya söylemek.
+ */
+async function warnIfEncoderStalled() {
+    // Canlı bir kaynakta ilk kareler ~1 sn içinde kodlanır; 6 sn fazlasıyla
+    // tolerans (tamamen durağan bir ekranda bile en az bir keyframe üretilir).
+    await new Promise(resolve => setTimeout(resolve, 6000));
+
+    const pc = producerTransport?.handler?._pc;
+    if (!pc || !videoProducer || videoProducer.closed) return;
+
+    let framesEncoded = 0;
+    try {
+        (await pc.getStats()).forEach((report) => {
+            if (report.type === 'outbound-rtp' && report.kind === 'video') {
+                framesEncoded = Math.max(framesEncoded, report.framesEncoded || 0);
+            }
+        });
+    } catch (e) {
+        return; // Ölçemiyorsak sessiz kal; yanlış alarm vermeyelim.
+    }
+
+    if (framesEncoded > 0) return;
+
+    console.error('Video kodlayıcı hiç kare üretmedi — izleyiciler siyah ekran görüyor.');
+    showToast(
+        'Görüntü kodlanamıyor, izleyiciler siyah ekran görüyor. Yayını durdurup farklı bir kalite ayarıyla tekrar deneyin.',
+        'warning',
+        12000
+    );
 }
 
 btnStopStream.addEventListener('click', stopStream);
@@ -2298,9 +2332,23 @@ async function setConsumerQuality(consumer, quality) {
 
 // ==================== HELPERS ====================
 
-/** Seçilen codec VP9 ise uzamsal katmanlı SVC, değilse yalnızca zamansal. */
-function pickScalabilityMode(codec) {
-    return /vp9/i.test(codec?.mimeType || '') ? 'L3T3_KEY' : 'L1T3';
+/**
+ * Tek uzamsal katman, üç zamansal katman — her codec için.
+ *
+ * Bir süre VP9'da 'L3T3_KEY' isteniyordu; niyet, zayıf izleyiciye çözünürlüğü
+ * de düşürebilmekti. Üretimde Chrome ile ölçüldü: bu modda yayıncının
+ * kodlayıcısı hiç çalışmıyor (outbound-rtp framesEncoded 0'da kalıyor),
+ * izleyiciye paket gidiyor ama tek kare bile birleşmiyor (framesReceived 0,
+ * pliCount durmadan artıyor) — yani TÜM izleyiciler siyah ekran görüyor.
+ * Aynı gönderici L1T3'e çevrildiği anda kareler akmaya başlıyor. 'L3T3' ve
+ * 'L2T3_KEY' de aynı şekilde kırık; sorun uzamsal katmanın kendisinde.
+ *
+ * Çözünürlük uyarlaması geri istenirse doğru yol simulcast'tir (birden çok
+ * encoding); sunucu tarafı bunu zaten destekliyor (bkz. backend/svcLayers.js,
+ * getMaxSpatialLayer encodings.length'ten de katman çıkarıyor).
+ */
+function pickScalabilityMode() {
+    return 'L1T3';
 }
 
 function pickVideoCodec(preferSimulcast) {

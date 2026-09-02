@@ -33,6 +33,42 @@ function check(name, ok, detail = '') {
     console.log(`${ok ? 'GEÇTİ ' : 'KALDI '} ${name}${detail ? ' — ' + detail : ''}`);
 }
 
+/**
+ * Sayfadaki RTCPeerConnection'ları yakalayıp `window.__rtcStats(tip, kind)`
+ * yardımcısını kurar. Uygulama transport'ları modül kapsamında tuttuğu için
+ * dışarıdan erişilemiyor; kurucuyu sarmalamak tek yol. Transport'lar bu
+ * çağrıdan SONRA oluştuğundan sayfa yüklendikten sonra kurmak yeterli.
+ */
+async function captureRtcStats(target) {
+    await target.evaluate(() => {
+        const pcs = [];
+        const Orig = window.RTCPeerConnection;
+        window.RTCPeerConnection = function (...args) {
+            const pc = new Orig(...args);
+            pcs.push(pc);
+            return pc;
+        };
+        window.RTCPeerConnection.prototype = Orig.prototype;
+        Object.setPrototypeOf(window.RTCPeerConnection, Orig);
+
+        window.__rtcStats = async (type, kind) => {
+            const total = { framesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
+            for (const pc of pcs) {
+                (await pc.getStats()).forEach((r) => {
+                    if (r.type !== type || r.kind !== kind) return;
+                    total.framesEncoded += r.framesEncoded || 0;
+                    total.framesDecoded += r.framesDecoded || 0;
+                    total.bytesSent += r.bytesSent || 0;
+                    total.bytesReceived += r.bytesReceived || 0;
+                    total.pliCount += r.pliCount || 0;
+                    if (r.scalabilityMode) total.scalabilityMode = r.scalabilityMode;
+                });
+            }
+            return total;
+        };
+    });
+}
+
 (async () => {
     const browser = await chromium.launch({
         // CI/konteynerde özel bir Chromium yolu verilebilir
@@ -164,7 +200,64 @@ function check(name, ok, detail = '') {
     const kickBtn = await page.locator('#userListContainer button[data-action="kick"]').count();
     check('moderasyon butonları satır içi onclick olmadan üretildi', kickBtn === 1);
 
-    // ---------- 6. Sorgu parametresi olmadan yönetici ----------
+    // ---------- 6. Medya gerçekten akıyor mu? ----------
+    // Bildirilen üretim hatası: yayıncı yayını başlatıyor, kendi önizlemesini
+    // sorunsuz görüyor, sunucu hata döndürmüyor — ama izleyicide ekran siyah.
+    // Sebep yanlış bir scalabilityMode'du: kodlayıcı hiç çalışmıyordu. Hiçbir
+    // birim testi bunu göremez; ancak gerçek kodlayıcı + gerçek SFU ile ölçülür.
+    //
+    // Ekran seçici otomatikleştirilemediği için getDisplayMedia'yı hareketli bir
+    // canvas ile değiştiriyoruz. Kaynağın ötesindeki her şey (codec seçimi,
+    // scalabilityMode, produce, SFU, consume, decode) gerçek koddur.
+    await page.bringToFront();
+    await captureRtcStats(page);
+    await captureRtcStats(viewer);
+
+    await page.evaluate(() => {
+        const cv = document.createElement('canvas');
+        cv.width = 640; cv.height = 360;
+        const ctx = cv.getContext('2d');
+        let f = 0;
+        setInterval(() => {
+            f++;
+            ctx.fillStyle = `hsl(${f % 360},70%,45%)`;
+            ctx.fillRect(0, 0, cv.width, cv.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '48px sans-serif';
+            ctx.fillText('F' + f, 40, 180);
+        }, 100);
+        const stream = cv.captureStream(30);
+        navigator.mediaDevices.getDisplayMedia = async () => stream;
+    });
+
+    await page.click('#btnStartStream');
+    await page.waitForTimeout(9000);
+
+    const sent = await page.evaluate(() => window.__rtcStats('outbound-rtp', 'video'));
+    check(
+        'yayıncının kodlayıcısı kare üretti',
+        sent.framesEncoded > 0,
+        `framesEncoded=${sent.framesEncoded} bytesSent=${sent.bytesSent} mode=${sent.scalabilityMode || '-'}`
+    );
+
+    const received = await viewer.evaluate(() => window.__rtcStats('inbound-rtp', 'video'));
+    check(
+        'izleyici görüntüyü çözdü (siyah ekran yok)',
+        received.framesDecoded > 0,
+        `framesDecoded=${received.framesDecoded} pli=${received.pliCount}`
+    );
+
+    const viewerVideo = await viewer.evaluate(() => {
+        const v = document.getElementById('remoteVideo');
+        return { readyState: v?.readyState ?? -1, width: v?.videoWidth ?? 0 };
+    });
+    check(
+        'izleyicinin video elementinde gerçek kare var',
+        viewerVideo.readyState >= 2 && viewerVideo.width > 0,
+        `readyState=${viewerVideo.readyState} genişlik=${viewerVideo.width}`
+    );
+
+    // ---------- 7. Sorgu parametresi olmadan yönetici ----------
     // Bildirilen üretim hatası: oda oluşturunca yönetici yerine izleyici tarafı
     // açılıyordu. Yönetici modu artık URL'e değil token'a bağlı; `?admin=true`
     // hiç olmasa bile sekmede sır varsa yönetici arayüzü açılmalı.
@@ -174,7 +267,7 @@ function check(name, ok, detail = '') {
     const adminWithoutFlag = await page.isVisible('#btnStartStream').catch(() => false);
     check('token varken ?admin=true olmadan da yönetici açılıyor', adminWithoutFlag === true);
 
-    // ---------- 7. Sonuç ----------
+    // ---------- 8. Sonuç ----------
     console.log('\nDış kaynak isteği:', externalRequests.length ? externalRequests.join(', ') : 'yok');
     console.log('Başarısız istek  :', failedRequests.length ? failedRequests.join(', ') : 'yok');
     console.log('Konsol hataları  :', errors.length ? errors.slice(0, 5).join(' | ') : 'yok');
