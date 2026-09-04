@@ -301,7 +301,8 @@ io.on('connection', (socket) => {
             userCount,
             isStreaming: roomState?.isStreaming || false,
             viewerMicEnabled: roomState?.viewerMicEnabled ?? true,
-            chatEnabled: roomState?.chatEnabled ?? true
+            chatEnabled: roomState?.chatEnabled ?? true,
+            contentType: roomState?.contentType || 'detail'
         });
 
         // Broadcast updated user list
@@ -515,6 +516,23 @@ io.on('connection', (socket) => {
     // ==================== CHAT ====================
 
     // Toggle chat (admin only)
+    // Yayıncı içerik türünü değiştirdi. İzleyicilerin oynatma tamponu buna göre
+    // ayarlanıyor: 'motion' (film/oyun) → büyük tampon, akıcılık öncelikli;
+    // 'detail' (sunum/metin) → küçük tampon, gecikme öncelikli.
+    socket.on('set-content-type', ({ contentType }, callback) => {
+        if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
+
+        const socketData = roomManager.getRoomFromSocket(socket.id);
+        if (!socketData?.roomState) { callback?.({ error: 'Oda bulunamadı' }); return; }
+
+        const value = contentType === 'motion' ? 'motion' : 'detail';
+        socketData.roomState.contentType = value;
+        io.to(socketData.roomId).emit('content-type', { contentType: value });
+
+        callback?.({ success: true });
+        log.debug(`🎞️ İçerik türü '${value}' (room ${socketData.roomId})`);
+    });
+
     socket.on('toggle-chat', ({ enabled }, callback) => {
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 

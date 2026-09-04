@@ -268,7 +268,11 @@ class RoomManager {
             adminToken,
             creatorIp,
             viewerMicEnabled: true,   // Can viewers use mic?
-            chatEnabled: true          // Is chat open?
+            chatEnabled: true,         // Is chat open?
+            // Yayıncının paylaştığı içeriğin türü. İzleyici tarafında oynatma
+            // tamponunun boyutunu bu belirliyor: film izlerken gecikme önemsiz,
+            // akıcılık her şey; sunumda tersi. Varsayılan 'detail' (sunum).
+            contentType: 'detail'
         });
 
         this.socketRooms.set(adminSocketId, { roomId, role: 'admin', nickname: '', ip: creatorIp });
@@ -371,6 +375,7 @@ class RoomManager {
             isStreaming: roomState.isStreaming,
             viewerMicEnabled: roomState.viewerMicEnabled,
             chatEnabled: roomState.chatEnabled,
+            contentType: roomState.contentType || 'detail',
             workerIndex: room.worker_index,
             maxUsers: room.max_users,
             userCount: newUserCount

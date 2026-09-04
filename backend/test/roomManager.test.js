@@ -244,3 +244,27 @@ test('parola doğrulaması asenkron ve doğru sonuç verir', async () => {
     assert.equal((await rm.joinRoom(roomId, 'v1', 'yanlisparola', '1.1.1.1')).needPassword, true);
     assert.equal((await rm.joinRoom(roomId, 'v1', 'dogruparola', '1.1.1.1')).success, true);
 });
+
+test('yeni oda sunum modunda başlar ve katılan bunu öğrenir', async () => {
+    // İçerik türü izleyicinin oynatma tamponunu belirliyor (film modunda büyük,
+    // sunumda küçük). Katılım cevabında taşınmazsa izleyici yanlış tamponla
+    // başlar ve yayıncı türü değiştirene kadar öyle kalır.
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'İçerik Türü', adminSocketId: ADMIN });
+
+    assert.equal(rm.rooms.get(roomId).contentType, 'detail');
+
+    const joined = await rm.joinRoom(roomId, 'viewer-1', null, '1.2.3.4');
+    assert.equal(joined.success, true);
+    assert.equal(joined.contentType, 'detail');
+});
+
+test('film moduna geçildiğinde katılanlar film modunu görür', async () => {
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'Film', adminSocketId: ADMIN });
+
+    rm.rooms.get(roomId).contentType = 'motion';
+
+    const joined = await rm.joinRoom(roomId, 'viewer-2', null, '1.2.3.5');
+    assert.equal(joined.contentType, 'motion');
+});

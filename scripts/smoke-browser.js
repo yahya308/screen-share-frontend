@@ -62,6 +62,21 @@ async function captureRtcStats(target) {
             return false;
         };
 
+        /** Tüm alıcıların oynatma tamponu hedefi (ms). */
+        window.__jitterTargets = () => pcs
+            .flatMap(pc => pc.getReceivers())
+            .filter(r => 'jitterBufferTarget' in r && r.jitterBufferTarget != null)
+            .map(r => r.jitterBufferTarget);
+
+        /** Video göndericisinin darboğazda neyi feda edeceği. */
+        window.__degradationPreference = () => {
+            for (const pc of pcs) {
+                const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+                if (sender) return sender.getParameters().degradationPreference || null;
+            }
+            return null;
+        };
+
         /** Gönderimde fiilen pazarlanmış video codec'inin mimeType'ı. */
         window.__negotiatedVideoCodec = async () => {
             for (const pc of pcs) {
@@ -308,6 +323,28 @@ async function captureRtcStats(target) {
         'kodlama kare hızı 5 fps tavanına takılmıyor',
         encodeFps > 8,
         `~${encodeFps.toFixed(1)} fps (framesEncoded=${sent.framesEncoded})`
+    );
+
+    // İçerik türü zinciri: yayıncı seçer → sunucu odaya dağıtır → izleyicinin
+    // oynatma tamponu değişir. Film modunda tampon büyür; NACK ile gelen paketin
+    // yetişebilmesi buna bağlı ve uzun seanslardaki takılmaların hedefi bu.
+    const bufferBefore = await viewer.evaluate(() => window.__jitterTargets());
+
+    await page.selectOption('#contentTypeSelect', 'motion');
+    await page.waitForTimeout(2000);
+
+    const bufferAfter = await viewer.evaluate(() => window.__jitterTargets());
+    check(
+        'yayıncının içerik türü izleyicinin oynatma tamponunu değiştiriyor',
+        bufferAfter.length > 0 && bufferAfter.every(v => v > (bufferBefore[0] ?? 0)),
+        `önce=${bufferBefore.join(',') || '-'} sonra=${bufferAfter.join(',') || '-'}`
+    );
+
+    const degradation = await page.evaluate(() => window.__degradationPreference());
+    check(
+        'film modunda kodlayıcı kare hızını koruyor',
+        degradation === 'maintain-framerate',
+        `degradationPreference=${degradation || '-'}`
     );
 
     // Opus NACK iki yönde de açık mı? mediasoup-client `opusNack` verilmezse

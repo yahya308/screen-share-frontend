@@ -301,6 +301,7 @@ async function initSocket(nickname) {
                 maxUsersInput.value = result.maxUsers || 100;
                 viewerMicEnabled = result.viewerMicEnabled ?? true;
                 chatEnabled = result.chatEnabled ?? true;
+                roomContentType = result.contentType === 'motion' ? 'motion' : 'detail';
 
                 isAdmin = true;
                 setupAdminUI();
@@ -409,6 +410,12 @@ function registerSocketEvents() {
         }
     });
 
+    // Yayıncı içerik türünü değiştirdi: oynatma tamponunu yeniden ayarla.
+    socket.on('content-type', ({ contentType }) => {
+        roomContentType = contentType === 'motion' ? 'motion' : 'detail';
+        applyPlayoutBuffer();
+    });
+
     // Chat state changed by admin
     socket.on('chat-state', ({ enabled }) => {
         chatEnabled = enabled;
@@ -456,6 +463,7 @@ function attemptJoinRoom(password, nickname) {
         userCount.textContent = result.userCount || 1;
         viewerMicEnabled = result.viewerMicEnabled ?? true;
         chatEnabled = result.chatEnabled ?? true;
+        roomContentType = result.contentType === 'motion' ? 'motion' : 'detail';
 
         isAdmin = false;
         setupViewerUI();
@@ -504,6 +512,7 @@ function showPasswordModal(nickname) {
             userCount.textContent = result.userCount || 1;
             viewerMicEnabled = result.viewerMicEnabled ?? true;
             chatEnabled = result.chatEnabled ?? true;
+            roomContentType = result.contentType === 'motion' ? 'motion' : 'detail';
             isAdmin = false;
             setupViewerUI();
             updateViewerMicButton();
@@ -955,11 +964,7 @@ async function consumeProducer(producerId, meta = null) {
                 if (!statsStarted) { startStatsLoop(false); statsStarted = true; }
                 setTimeout(() => setConsumerQuality(consumer, currentQuality), 500);
 
-                try {
-                    const receivers = consumerTransport.handler._pc.getReceivers();
-                    const vr = receivers.find(r => r.track?.kind === 'video');
-                    if (vr && 'jitterBufferTarget' in vr) vr.jitterBufferTarget = 100;
-                } catch (e) { /* yoksay */ }
+                applyPlayoutBuffer();
             }
 
             if (params.kind === 'video') {
@@ -1369,6 +1374,22 @@ presetButtons.forEach(btn => {
     btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
 });
 
+// Son seçilen içerik türünü hatırla: film izleyen biri her oturumda yeniden
+// seçmek zorunda kalmasın.
+try {
+    const saved = localStorage.getItem('velo_content_type');
+    if (saved && contentTypeSelect) contentTypeSelect.value = saved;
+} catch (e) { /* yoksay */ }
+
+contentTypeSelect?.addEventListener('change', () => {
+    publishContentType();
+    // Yayın sürerken de anında geçerli olsun: kodlayıcının neyi feda edeceğini
+    // yeniden yayın açmadan değiştirebiliyoruz.
+    applyDegradationPreference();
+    const track = localVideo.srcObject?.getVideoTracks?.()[0];
+    if (track && track.contentHint !== undefined) track.contentHint = pickContentHint();
+});
+
 btnStartStream.addEventListener('click', async () => {
     await initMediasoup();
     await startStream();
@@ -1461,6 +1482,8 @@ async function startStream() {
             btnStartStream.classList.add('hidden');
             btnStopStream.classList.remove('hidden');
             showToast('Yayın başlandı', 'success');
+            applyDegradationPreference();
+            publishContentType();
             warnIfEncoderStalled();
             startStatsLoop(true);
             statsStarted = true;
@@ -2347,6 +2370,70 @@ async function setConsumerQuality(consumer, quality) {
 }
 
 // ==================== HELPERS ====================
+
+// ==================== OYNATMA TAMPONU (İZLEYİCİ) ====================
+//
+// Kaybolan bir paketin yeniden istenmesi (NACK) ancak oynatma tamponu o turu
+// bekleyecek kadar büyükse işe yarar: RTT ~70 ms iken 100 ms'lik tampon tek bir
+// yeniden gönderime bile zar zor yetiyor, paket geç kalıyor ve kare atlanıyor —
+// uzun film seanslarındaki "ara ara takılma" büyük ölçüde bu.
+//
+// Bu uygulama bir görüşme değil, izleme aracı: gecikme bütçesi cömert.
+// Film modunda gecikmeyi akıcılığa çeviriyoruz. Sunum modunda tampon küçük
+// kalıyor çünkü orada tepki süresi hissediliyor.
+//
+// Ses ve video AYNI değeri alıyor: farklı olursa dudak senkronu bozulur.
+const PLAYOUT_BUFFER_MS = { motion: 400, detail: 150 };
+
+let roomContentType = 'detail';
+
+/** Yürürlükteki içerik türüne göre tüm alıcıların tamponunu ayarla. */
+function applyPlayoutBuffer() {
+    const target = PLAYOUT_BUFFER_MS[roomContentType] ?? PLAYOUT_BUFFER_MS.detail;
+    try {
+        // mediasoup-client alıcıları dışarı açmıyor; transport'un içindeki
+        // bağlantıya gitmek gerekiyor (kodda başka yerlerde de aynı bağımlılık).
+        const receivers = consumerTransport?.handler?._pc?.getReceivers?.() || [];
+        for (const r of receivers) {
+            if ('jitterBufferTarget' in r) r.jitterBufferTarget = target;
+        }
+    } catch (e) { /* tarayıcı desteklemiyorsa sessizce geç */ }
+}
+
+/**
+ * Kodlayıcıya darboğazda neyi feda edeceğini AÇIKÇA söyle.
+ *
+ * Spesifikasyonda contentHint'in tek zorunlu etkisi, degradationPreference
+ * ayarlanmamışsa onu 'maintain-resolution' yapmak. Tarayıcılar bunun ötesinde
+ * farklı davranıyor, o yüzden varsayılana güvenmiyoruz: film izlerken
+ * çözünürlük düşsün ama kare hızı korunsun ('maintain-framerate'), sunumda
+ * tersi. Film modunda bant daralınca kare atlamak yerine biraz yumuşamak,
+ * izleyici için kıyaslanamayacak kadar iyi.
+ */
+function applyDegradationPreference() {
+    const pc = producerTransport?.handler?._pc;
+    if (!pc) return;
+    const sender = pc.getSenders?.().find(s => s.track?.kind === 'video');
+    if (!sender) return;
+
+    try {
+        const params = sender.getParameters();
+        params.degradationPreference = pickContentHint() === 'motion'
+            ? 'maintain-framerate'
+            : 'maintain-resolution';
+        void sender.setParameters(params);
+    } catch (e) {
+        console.warn('degradationPreference ayarlanamadı:', e.message);
+    }
+}
+
+/** Yayıncı: içerik türünü sunucuya bildir, sunucu izleyicilere dağıtsın. */
+function publishContentType() {
+    const value = pickContentHint();
+    roomContentType = value;
+    try { localStorage.setItem('velo_content_type', value); } catch (e) { /* yoksay */ }
+    if (socket?.connected) socket.emit('set-content-type', { contentType: value });
+}
 
 /**
  * Ekran paylaşımı için codec sırası.
