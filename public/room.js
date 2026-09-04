@@ -141,6 +141,8 @@ const maxUsersInput      = document.getElementById('maxUsersInput');
 const resSelect          = document.getElementById('resSelect');
 const fpsSelect          = document.getElementById('fpsSelect');
 const bitrateInput       = document.getElementById('bitrateInput');
+const contentTypeSelect  = document.getElementById('contentTypeSelect');
+const codecSelect        = document.getElementById('codecSelect');
 
 // Viewer elements
 const btnViewerMic  = document.getElementById('btnViewerMic');
@@ -1414,10 +1416,14 @@ async function startStream() {
         const actualH    = settings.height || height;
         const actualFps  = settings.frameRate || fps;
 
-        if (videoTrack.contentHint !== undefined) videoTrack.contentHint = 'detail';
+        // 'detail' çözünürlüğü, 'motion' kare hızını korur. Spesifikasyona göre
+        // contentHint ayrıca degradationPreference'ı da belirliyor
+        // (detail → maintain-resolution, motion → maintain-framerate), bu yüzden
+        // ayrıca degradationPreference ayarlamıyoruz: tek kaynaktan yönetiliyor.
+        if (videoTrack.contentHint !== undefined) videoTrack.contentHint = pickContentHint();
 
-        const codec = pickVideoCodec(false);
-        const scalabilityMode = pickScalabilityMode();
+        const codec = pickScreenCodec();
+        const scalabilityMode = pickScalabilityMode(codec);
         videoProducer = await producerTransport.produce({
             track: videoTrack,
             encodings: [{ maxBitrate: bitrate, maxFramerate: actualFps, scalabilityMode }],
@@ -2343,6 +2349,44 @@ async function setConsumerQuality(consumer, quality) {
 // ==================== HELPERS ====================
 
 /**
+ * Ekran paylaşımı için codec sırası.
+ *
+ * VP9 ARTIK SON SIRADA. libwebrtc'de tek uzamsal katmanlı VP9 screencast'in
+ * varsayılan azami kare hızı 5 fps olarak sabit kodlanmış
+ * (vp9/svc_config.cc); `contentHint='detail'` verildiğinde ya da kaynak ekran
+ * olduğunda kodlayıcı bu moda giriyor. Kayıt (webrtc:13016) doğrulanmış ama
+ * düzeltilmemiş, arşivlenmiş. Google Meet de ekran/sekme paylaşımında VP9
+ * kullanmıyor — kamerada VP9 SVC, ekranda VP8 simulcast.
+ *
+ * Varsayılan VP8: Meet'in ölçekte kullandığı seçenek, screencast tuzağı yok,
+ * donanım çözme her yerde var. AV1 ekran içeriği kodlamasıyla düşük bantta
+ * belirgin şekilde daha iyi ama gerçek zamanlı kodlaması CPU pahalı — bu
+ * yüzden varsayılan değil, arayüzden seçilebilir.
+ */
+const CODEC_ORDER = {
+    vp8:  ['video/vp8',  'video/h264', 'video/av1',  'video/vp9'],
+    av1:  ['video/av1',  'video/vp8',  'video/h264', 'video/vp9'],
+    h264: ['video/h264', 'video/vp8',  'video/av1',  'video/vp9'],
+    vp9:  ['video/vp9',  'video/vp8',  'video/h264', 'video/av1']
+};
+
+/** Kullanıcının seçtiği codec'i, cihazın gerçekten desteklediğiyle kesiştir. */
+function pickScreenCodec() {
+    const codecs = device?.rtpCapabilities?.codecs || [];
+    const wanted = CODEC_ORDER[codecSelect?.value] || CODEC_ORDER.vp8;
+    for (const mime of wanted) {
+        const found = codecs.find(c => c.mimeType?.toLowerCase() === mime);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** Seçilen içerik türü: netlik mi (metin) akıcılık mı (video) korunsun. */
+function pickContentHint() {
+    return contentTypeSelect?.value === 'motion' ? 'motion' : 'detail';
+}
+
+/**
  * Tek uzamsal katman, üç zamansal katman — her codec için.
  *
  * Bir süre VP9'da 'L3T3_KEY' isteniyordu; niyet, zayıf izleyiciye çözünürlüğü
@@ -2356,17 +2400,13 @@ async function setConsumerQuality(consumer, quality) {
  * Çözünürlük uyarlaması geri istenirse doğru yol simulcast'tir (birden çok
  * encoding); sunucu tarafı bunu zaten destekliyor (bkz. backend/svcLayers.js,
  * getMaxSpatialLayer encodings.length'ten de katman çıkarıyor).
+ *
+ * H264 istisna: libwebrtc'nin H264 kodlayıcısı zamansal katman bildirmiyor,
+ * scalabilityMode vermek kodlayıcı kurulumunu başarısız kılabiliyor. O yüzden
+ * H264'te hiç göndermiyoruz (undefined => alan SDP'ye yazılmaz).
  */
-function pickScalabilityMode() {
-    return 'L1T3';
-}
-
-function pickVideoCodec(preferSimulcast) {
-    const codecs = device?.rtpCapabilities?.codecs || [];
-    const vp8 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/vp8');
-    const h264 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/h264');
-    const vp9 = codecs.find(c => c.mimeType?.toLowerCase() === 'video/vp9');
-    return preferSimulcast ? (vp8 || h264 || vp9 || null) : (vp9 || vp8 || h264 || null);
+function pickScalabilityMode(codec) {
+    return /h264/i.test(codec?.mimeType || '') ? undefined : 'L1T3';
 }
 
 function canUseDisplayCapture() {

@@ -44,7 +44,20 @@ module.exports = {
                         cbr: 0               // ⭐ VBR (Variable Bitrate) - daha verimli
                     }
                 },
-                // ⭐ VP9 - FIRST for SVC support (better compression, scalable layers)
+                // AV1 — ekran içeriği kodlaması (screen content coding) libwebrtc'de
+                // ekran kaynaklı track'ler ve contentHint='detail' için otomatik
+                // açılıyor; ölçümlerde slayt içeriğinde %25+ kare boyutu tasarrufu
+                // veriyor ve dar bantta metin okunabilirliğini açık ara koruyor.
+                // Gerçek zamanlı kodlaması pahalı olduğu için istemci varsayılanı
+                // değil, arayüzden seçilebilir (bkz. room.html codecSelect).
+                {
+                    kind: 'video',
+                    mimeType: 'video/AV1',
+                    clockRate: 90000
+                },
+                // ⭐ VP9 - SVC destekli ama EKRAN PAYLAŞIMINDA KULLANILMIYOR:
+                // libwebrtc tek uzamsal katmanlı VP9 screencast'i 5 fps'e
+                // kilitliyor (webrtc:13016). Kamera/diğer kullanımlar için duruyor.
                 {
                     kind: 'video',
                     mimeType: 'video/VP9',
@@ -77,14 +90,20 @@ module.exports = {
                         { type: 'transport-cc' }
                     ]
                 },
-                // H264 - For iOS Safari compatibility
+                // H264 — iOS Safari uyumluluğu ve Windows'ta donanım kodlama.
+                //
+                // Seviye 3.1'den ('42e01f') 4.2'ye ('42e02a') çıkarıldı. 3.1'in
+                // tavanı 1280x720@30: H264 seçilse bile 1080p taşınamıyordu ve
+                // yüksek çözünürlükte kare hızı çöküyordu (LiveKit ekibi aynı
+                // duvara çarpmış). 4.2 tam olarak bizim tavanımızı karşılıyor —
+                // 1920x1080@60 — daha fazlasını iddia etmiyoruz.
                 {
                     kind: 'video',
                     mimeType: 'video/H264',
                     clockRate: 90000,
                     parameters: {
                         'packetization-mode': 1,
-                        'profile-level-id': '42e01f',
+                        'profile-level-id': '42e02a',
                         'level-asymmetry-allowed': 1
                     }
                 }

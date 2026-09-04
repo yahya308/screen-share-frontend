@@ -62,6 +62,17 @@ async function captureRtcStats(target) {
             return false;
         };
 
+        /** Gönderimde fiilen pazarlanmış video codec'inin mimeType'ı. */
+        window.__negotiatedVideoCodec = async () => {
+            for (const pc of pcs) {
+                const stats = await pc.getStats();
+                let codecId = null;
+                stats.forEach(r => { if (r.type === 'outbound-rtp' && r.kind === 'video') codecId = r.codecId; });
+                if (codecId && stats.get(codecId)) return stats.get(codecId).mimeType;
+            }
+            return null;
+        };
+
         window.__rtcStats = async (type, kind) => {
             const total = { framesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
             for (const pc of pcs) {
@@ -236,7 +247,8 @@ async function captureRtcStats(target) {
             ctx.fillStyle = '#fff';
             ctx.font = '48px sans-serif';
             ctx.fillText('F' + f, 40, 180);
-        }, 100);
+        }, 33);   // ~30 fps kaynak: 5 fps tavanı kontrolünün anlamlı olması için
+                  // kaynağın tavanın belirgin üstünde olması gerekiyor
         const stream = cv.captureStream(30);
 
         // Sistem sesi yolunu da gerçekten çalıştır: ses üretilmezse SDP'de hiç
@@ -278,6 +290,24 @@ async function captureRtcStats(target) {
         'izleyicinin video elementinde gerçek kare var',
         viewerVideo.readyState >= 2 && viewerVideo.width > 0,
         `readyState=${viewerVideo.readyState} genişlik=${viewerVideo.width}`
+    );
+
+    // Ekran paylaşımı VP9'a düşmemeli: libwebrtc tek uzamsal katmanlı VP9
+    // screencast'i 5 fps'e kilitliyor (webrtc:13016, doğrulanmış ve
+    // düzeltilmemiş). Google Meet de ekran paylaşımında VP9 kullanmıyor.
+    // Kare hızını doğrudan ölçüyoruz; codec adı değişse bile bu tutar.
+    const videoCodec = await page.evaluate(() => window.__negotiatedVideoCodec());
+    check(
+        'ekran paylaşımı VP9 ile kodlanmıyor',
+        !!videoCodec && !/vp9/i.test(videoCodec),
+        `codec=${videoCodec || 'bilinmiyor'}`
+    );
+
+    const encodeFps = sent.framesEncoded / 9;   // 9 saniyelik pencere
+    check(
+        'kodlama kare hızı 5 fps tavanına takılmıyor',
+        encodeFps > 8,
+        `~${encodeFps.toFixed(1)} fps (framesEncoded=${sent.framesEncoded})`
     );
 
     // Opus NACK iki yönde de açık mı? mediasoup-client `opusNack` verilmezse
