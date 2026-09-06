@@ -21,12 +21,13 @@ let chromium;
 try {
     ({ chromium } = require('playwright'));
 } catch (e) {
-    console.error('Playwright kurulu değil. Duman testi isteğe bağlıdır:');
+    console.error('Playwright kurulu değil. Tarayıcı testi bağımlılıkları gerekli:');
     console.error('  npm i -D playwright && npx playwright install chromium');
-    process.exit(0);
+    process.exit(1);
 }
 
 const BASE = process.env.BASE || 'http://localhost:3100';
+const RELAY = process.env.FORCE_RELAY === '1';
 const results = [];
 function check(name, ok, detail = '') {
     results.push({ name, ok, detail });
@@ -37,13 +38,21 @@ function check(name, ok, detail = '') {
  * Sayfadaki RTCPeerConnection'ları yakalayıp `window.__rtcStats(tip, kind)`
  * yardımcısını kurar. Uygulama transport'ları modül kapsamında tuttuğu için
  * dışarıdan erişilemiyor; kurucuyu sarmalamak tek yol. Transport'lar bu
- * çağrıdan SONRA oluştuğundan sayfa yüklendikten sonra kurmak yeterli.
+ * çağrıdan SONRA oluşması için yardımcı sayfa yüklenmeden önce kurulur.
  */
 async function captureRtcStats(target) {
-    await target.evaluate(() => {
+    await target.addInitScript(({ turnTransport }) => {
         const pcs = [];
+        window.__pcs = pcs;
+        const sockets = [], NativeWebSocket = window.WebSocket;
+        window.WebSocket = class extends NativeWebSocket { constructor(...args) { super(...args); sockets.push(this); } };
+        window.__dropSignaling = () => sockets.filter(s => s.readyState === 1).forEach(s => s.close(4001, 'reconnection regression'));
+
         const Orig = window.RTCPeerConnection;
         window.RTCPeerConnection = function (...args) {
+            if (turnTransport && args[0]?.iceServers) {
+                args[0].iceServers = args[0].iceServers.map(server => ({ ...server, urls: [server.urls].flat().filter(url => turnTransport === 'tls' ? url.startsWith('turns:') : url.startsWith('turn:') && url.endsWith('transport=' + turnTransport)) })).filter(server => server.urls.length);
+            }
             const pc = new Orig(...args);
             pcs.push(pc);
             return pc;
@@ -64,13 +73,13 @@ async function captureRtcStats(target) {
 
         /** Tüm alıcıların oynatma tamponu hedefi (ms). */
         window.__jitterTargets = () => pcs
-            .flatMap(pc => pc.getReceivers())
+            .filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getReceivers())
             .filter(r => 'jitterBufferTarget' in r && r.jitterBufferTarget != null)
             .map(r => r.jitterBufferTarget);
 
         /** Video göndericisinin darboğazda neyi feda edeceği. */
         window.__degradationPreference = () => {
-            for (const pc of pcs) {
+            for (const pc of pcs.filter(p => p.connectionState !== 'closed')) {
                 const sender = pc.getSenders().find(s => s.track?.kind === 'video');
                 if (sender) return sender.getParameters().degradationPreference || null;
             }
@@ -79,7 +88,7 @@ async function captureRtcStats(target) {
 
         /** Gönderimde fiilen pazarlanmış video codec'inin mimeType'ı. */
         window.__negotiatedVideoCodec = async () => {
-            for (const pc of pcs) {
+            for (const pc of pcs.filter(p => p.connectionState !== 'closed')) {
                 const stats = await pc.getStats();
                 let codecId = null;
                 stats.forEach(r => { if (r.type === 'outbound-rtp' && r.kind === 'video') codecId = r.codecId; });
@@ -89,11 +98,12 @@ async function captureRtcStats(target) {
         };
 
         window.__rtcStats = async (type, kind) => {
-            const total = { framesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
+            const total = { framesEncoded: 0, maxFramesEncoded: 0, framesDecoded: 0, bytesSent: 0, bytesReceived: 0, pliCount: 0, scalabilityMode: null };
             for (const pc of pcs) {
                 (await pc.getStats()).forEach((r) => {
                     if (r.type !== type || r.kind !== kind) return;
                     total.framesEncoded += r.framesEncoded || 0;
+                    total.maxFramesEncoded = Math.max(total.maxFramesEncoded, r.framesEncoded || 0);
                     total.framesDecoded += r.framesDecoded || 0;
                     total.bytesSent += r.bytesSent || 0;
                     total.bytesReceived += r.bytesReceived || 0;
@@ -103,17 +113,18 @@ async function captureRtcStats(target) {
             }
             return total;
         };
-    });
+    }, { turnTransport: process.env.TURN_TEST_TRANSPORT || null });
 }
 
 (async () => {
     const browser = await chromium.launch({
         // CI/konteynerde özel bir Chromium yolu verilebilir
         executablePath: process.env.CHROMIUM_PATH || undefined,
-        args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
+        args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows']
     });
     const context = await browser.newContext();
     const errors = [];
+    let offlineProbe = false;
     const failedRequests = [];
     // CSP ihlalleri konsola "hata" olarak düşer ama diğer hatalarla karışır.
     // Ayrı tutuyoruz: sayfanın kendi kodunun engellenmesi tek başına raporlanacak
@@ -121,6 +132,7 @@ async function captureRtcStats(target) {
     // sayfa "sadece izleyici ekranı" gibi görünüyordu.
     const cspViolations = [];
     const noteError = (text) => {
+        if (offlineProbe && (text.includes('net::ERR_INTERNET_DISCONNECTED') || text.includes('WebSocket is already in CLOSING or CLOSED state.'))) return;
         errors.push(text);
         if (/Content Security Policy/i.test(text)) cspViolations.push(text);
     };
@@ -128,9 +140,10 @@ async function captureRtcStats(target) {
     context.on('weberror', (e) => noteError(String(e.error())));
 
     const page = await context.newPage();
-    page.on('console', (m) => { if (m.type() === 'error') noteError(m.text()); });
+    await captureRtcStats(page);
+    page.on('console', (m) => { if (m.type() === 'error') noteError(m.text()); if (m.type() === 'warning') console.log('YAYINCI UYARI: ' + m.text()); });
     page.on('pageerror', (e) => noteError(String(e)));
-    page.on('requestfailed', (r) => failedRequests.push(`${r.url()} ${r.failure()?.errorText}`));
+    page.on('requestfailed', (r) => { if (!r.url().includes('/socket.io/')) failedRequests.push(`${r.url()} ${r.failure()?.errorText}`); });
     const notFound = [];
     context.on('response', (r) => { if (r.status() >= 400) notFound.push(`${r.status()} ${r.url()}`); });
 
@@ -220,8 +233,9 @@ async function captureRtcStats(target) {
 
     // ---------- 5. İzleyici akışı ----------
     const viewer = await context.newPage();
+    await captureRtcStats(viewer);
     viewer.on('pageerror', (e) => noteError('viewer: ' + String(e)));
-    await viewer.goto(`${BASE}/room.html?roomId=${roomId}`, { waitUntil: 'domcontentloaded' });
+    await viewer.goto(`${BASE}/room.html?roomId=${roomId}${RELAY ? '&relay=1' : ''}`, { waitUntil: 'domcontentloaded' });
     await viewer.waitForSelector('#nicknameModal', { state: 'visible', timeout: 10000 }).catch(() => {});
     await viewer.fill('#nicknameInput', 'izleyici1').catch(() => {});
     await viewer.click('#btnConfirmNickname').catch(() => {});
@@ -247,12 +261,11 @@ async function captureRtcStats(target) {
     // canvas ile değiştiriyoruz. Kaynağın ötesindeki her şey (codec seçimi,
     // scalabilityMode, produce, SFU, consume, decode) gerçek koddur.
     await page.bringToFront();
-    await captureRtcStats(page);
-    await captureRtcStats(viewer);
+
 
     await page.evaluate(() => {
         const cv = document.createElement('canvas');
-        cv.width = 640; cv.height = 360;
+        cv.width = 1280; cv.height = 720;
         const ctx = cv.getContext('2d');
         let f = 0;
         setInterval(() => {
@@ -318,7 +331,7 @@ async function captureRtcStats(target) {
         `codec=${videoCodec || 'bilinmiyor'}`
     );
 
-    const encodeFps = sent.framesEncoded / 9;   // 9 saniyelik pencere
+    const encodeFps = sent.maxFramesEncoded / 9;   // 9 saniyelik pencere
     check(
         'kodlama kare hızı 5 fps tavanına takılmıyor',
         encodeFps > 8,
@@ -353,6 +366,73 @@ async function captureRtcStats(target) {
     check('yayıncı SDP\'sinde Opus NACK açık', await page.evaluate(() => window.__opusHasNack()) === true);
     check('izleyici SDP\'sinde Opus NACK açık', await viewer.evaluate(() => window.__opusHasNack()) === true);
 
+    // Actual pause click must survive the document-level gesture unlock.
+    await viewer.click('#btnPlayPause'); await viewer.waitForTimeout(300);
+    check('duraklatma genel tıklama dinleyicisinden sonra korunur', await viewer.evaluate(() => document.getElementById('remoteVideo').paused));
+    check('duraklatma sistem sesini de durdurur', await viewer.evaluate(() => [...document.querySelectorAll('audio')].filter(el => el.dataset.source === 'admin-sys-audio').every(el => el.paused)));
+    await viewer.click('#btnPlayPause'); await viewer.waitForTimeout(300);
+    check('devam düğmesi canlı görüntüyü sürdürür', await viewer.evaluate(() => !document.getElementById('remoteVideo').paused));
+    await viewer.fill('#chatInput', 'kısayol testi'); await viewer.press('#chatInput', 'Space');
+    check('sohbette Space yayını durdurmaz', await viewer.evaluate(() => !document.getElementById('remoteVideo').paused));
+    const encodings = await page.evaluate(() => window.__pcs.flatMap(p => p.getSenders()).find(s => s.track?.kind === 'video')?.getParameters().encodings || []);
+    check('iki katman toplam bitrate bütçesini aşmaz', encodings.length === 2 && encodings.reduce((sum, e) => sum + e.maxBitrate, 0) <= 5000000, JSON.stringify(encodings.map(e => ({ maxBitrate: e.maxBitrate, scale: e.scaleResolutionDownBy }))));
+    const googleBits = await page.evaluate(() => window.__pcs.map(p => p.localDescription?.sdp || '').join('\n').match(/x-google-start-bitrate=(\d+)/)?.[1]);
+    check('Google başlangıç bitrate birimi kbps', !googleBits || Number(googleBits) <= 20000, googleBits || 'parametre yok');
+    await viewer.selectOption('#qualitySelect', 'low'); await viewer.waitForTimeout(2500);
+    const lowWidth = await viewer.evaluate(() => document.getElementById('remoteVideo').videoWidth);
+    check('düşük kalite gerçek çözünürlüğü azaltır', lowWidth > 0 && lowWidth <= 640, String(lowWidth));
+    await viewer.selectOption('#qualitySelect', 'auto');
+    await page.click('[data-preset="medium"]');
+    check('hazır ayar uygulanana kadar bekliyor olarak gösterilir', (await page.textContent('#settingsStatus')).includes('henüz uygulanmadı'));
+    await page.click('#btnApplySettings'); await page.waitForTimeout(5000);
+    check('canlı ayar değişikliği yeniden ekran seçmeden uygulanır', (await page.textContent('#settingsStatus')).includes('Uygulandı'), await page.evaluate(() => JSON.stringify({ status: document.getElementById('settingsStatus').textContent, media: document.getElementById('mediaStatus').textContent, toast: document.getElementById('toastMessage').textContent, track: document.getElementById('localVideo').srcObject?.getVideoTracks()[0]?.readyState })));
+    if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: process.env.SCREENSHOT_DIR + '/publisher-check.png', fullPage: true });
+    const late = await context.newPage(); await captureRtcStats(late);
+    await late.goto(BASE + '/room.html?roomId=' + roomId + (RELAY ? '&relay=1' : ''));
+    await late.fill('#nicknameInput', 'gecizleyici'); await late.click('#btnConfirmNickname');
+    await late.waitForTimeout(4000);
+    const lateTargets = await late.evaluate(() => window.__jitterTargets());
+    check('sonradan gelen görüntü ve ses film tamponunu alır', lateTargets.length >= 2 && lateTargets.every(value => value >= 400), JSON.stringify(lateTargets));
+    await late.close();
+    if (RELAY) {
+        await viewer.waitForTimeout(2500);
+        const routes = await viewer.evaluate(async () => {
+            const out = [];
+            for (const pc of window.__pcs.filter(p => p.connectionState !== 'closed')) {
+                const stats = await pc.getStats();
+                const transport = [...stats.values()].find(r => r.type === 'transport' && r.selectedCandidatePairId);
+                const pair = transport ? stats.get(transport.selectedCandidatePairId) : null;
+                const local = pair ? stats.get(pair.localCandidateId) : null;
+                out.push({ policy: pc.getConfiguration().iceTransportPolicy, relayed: !!(local?.relayProtocol || local?.candidateType === 'relay'), protocol: local?.relayProtocol, route: document.getElementById('statsRoute').textContent });
+            } return out;
+        });
+        check('relay zorunlu izleyici gerçekten TURN kullanır', routes.some(r => r.policy === 'relay' && r.relayed && (!process.env.TURN_TEST_TRANSPORT || r.protocol === process.env.TURN_TEST_TRANSPORT)), JSON.stringify(routes));
+        check('kalite paneli TURN yolunu gösterir', (await viewer.textContent('#statsRoute')).startsWith('TURN'));
+    }
+    await page.click('#btnToggleMic'); await viewer.click('#btnViewerMic'); await viewer.waitForTimeout(2500);
+    check('yayıncı ve izleyici mikrofonları ayrı bağlantılarda yayınlanır', await page.evaluate(() => window.__pcs.filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getSenders()).filter(sender => sender.track?.kind === 'audio').length >= 2) && await viewer.evaluate(() => window.__pcs.filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getSenders()).some(sender => sender.track?.kind === 'audio')));
+    check('konuşma sesi filmden kısa tampon kullanır', (await viewer.evaluate(() => window.__jitterTargets())).includes(80));
+    // Loss of signaling must replace stale transports and reuse live capture.
+    offlineProbe = true; await context.setOffline(true);
+    await page.evaluate(() => window.__dropSignaling()); await viewer.evaluate(() => window.__dropSignaling());
+    await page.waitForTimeout(10000); await context.setOffline(false);
+    await viewer.waitForFunction(() => {
+        const video = document.getElementById('remoteVideo');
+        return video.srcObject && video.readyState >= 2 && !document.getElementById('pausedOverlay').offsetWidth;
+    }, null, { timeout: 25000 });
+    offlineProbe = false;
+    const recovered = await viewer.evaluate(() => window.__rtcStats('inbound-rtp', 'video'));
+    check('10 saniyelik kopmadan sonra yayın tekrar çözülür', recovered.framesDecoded > 0, String(recovered.framesDecoded));
+    check('mikrofonlar yeniden bağlanınca geri gelir', await viewer.evaluate(() => window.__pcs.filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getSenders()).some(sender => sender.track?.kind === 'audio')));
+    check('ekran izi bağlantı koparken korunur', await page.evaluate(() => document.getElementById('localVideo').srcObject?.getVideoTracks()[0]?.readyState === 'live'));
+    if (process.env.SCREENSHOT_DIR) {
+        await viewer.screenshot({ path: process.env.SCREENSHOT_DIR + '/viewer.png', fullPage: true });
+        await page.screenshot({ path: process.env.SCREENSHOT_DIR + '/publisher.png', fullPage: true });
+        await viewer.setViewportSize({ width: 390, height: 844 });
+        await viewer.screenshot({ path: process.env.SCREENSHOT_DIR + '/viewer-mobile.png', fullPage: true });
+        check('mobil görünüm yatay taşma yapmaz', await viewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    }
+
     // ---------- 7. Sorgu parametresi olmadan yönetici ----------
     // Bildirilen üretim hatası: oda oluşturunca yönetici yerine izleyici tarafı
     // açılıyordu. Yönetici modu artık URL'e değil token'a bağlı; `?admin=true`
@@ -374,6 +454,8 @@ async function captureRtcStats(target) {
     check('başarısız kaynak isteği yok', failedRequests.length === 0);
     check('konsol hatası yok', errors.length === 0);
 
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('#btnCloseRoom');
     await browser.close();
 
     const failed = results.filter(r => !r.ok);

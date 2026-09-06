@@ -80,6 +80,13 @@ function render({ workerManager, roomManager, io }) {
     out.push('# TYPE velostream_worker_rooms gauge');
     workerStats.forEach(w => out.push(line('velostream_worker_rooms', w.rooms, { worker: w.index })));
 
+    out.push('# HELP velostream_worker_cpu_percent Worker CPU, one core = 100 percent');
+    out.push('# TYPE velostream_worker_cpu_percent gauge');
+    workerStats.filter(w => Number.isFinite(w.cpuPercent)).forEach(w => out.push(line('velostream_worker_cpu_percent', w.cpuPercent.toFixed(2), { worker: w.index })));
+    out.push('# HELP velostream_worker_peak_rss_bytes Worker peak RSS');
+    out.push('# TYPE velostream_worker_peak_rss_bytes gauge');
+    workerStats.filter(w => Number.isFinite(w.rssBytes)).forEach(w => out.push(line('velostream_worker_peak_rss_bytes', w.rssBytes, { worker: w.index })));
+
     out.push('# HELP velostream_workers_alive Ayakta olan worker sayısı');
     out.push('# TYPE velostream_workers_alive gauge');
     out.push(line('velostream_workers_alive', workerStats.length));

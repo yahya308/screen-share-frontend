@@ -17,6 +17,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npx eslint public/media-policy.mjs
 
   test:
     name: Backend testleri
@@ -37,3 +38,39 @@ jobs:
       - run: npm test
         env:
           MEDIASOUP_WORKERS: '1'
+
+  browser:
+    name: Gerçek görüntü ve ses
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci && npm --prefix backend ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Yayın, kalite, duraklatma ve yeniden bağlantı
+        run: |
+          mkdir -p build
+          node -e 'require("./backend/server").start({port:3100})' > build/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3100/health; then break; fi
+            sleep 1
+          done
+          node scripts/smoke-browser.js
+        env:
+          BASE: http://localhost:3100
+          ANNOUNCED_IP: 127.0.0.1
+          MEDIASOUP_WORKERS: '1'
+          ROOMS_DB_PATH: ':memory:'
+          SCREENSHOT_DIR: build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-verification
+          path: build

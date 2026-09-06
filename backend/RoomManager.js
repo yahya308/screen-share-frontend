@@ -13,8 +13,7 @@ const MAX_ROOMS = 50;
 const MAX_ROOMS_PER_IP = parseInt(process.env.MAX_ROOMS_PER_IP, 10) > 0
     ? parseInt(process.env.MAX_ROOMS_PER_IP, 10)
     : 3;
-const PIPE_THRESHOLD = 100;
-const ADMIN_GRACE_PERIOD = 5000;
+const ADMIN_GRACE_PERIOD = Math.max(5000, Math.min(120000, Number(process.env.ADMIN_GRACE_PERIOD_MS) || 45000));
 
 const ROOM_NAME_MIN = 3;
 const ROOM_NAME_MAX = 50;
@@ -261,7 +260,6 @@ class RoomManager {
             // transport.id -> transport. findTransport her medya olayında
             // (connect/produce/consume/restartIce) tüm koleksiyonu geziyordu.
             transportsById: new Map(),
-            pipeTransports: new Map(),
             pipeProducers: new Map(),
             isStreaming: false,
             adminJoined: false,
@@ -400,8 +398,7 @@ class RoomManager {
             for (const [consumerId, consumerData] of roomState.consumers) {
                 if (consumerData.socketId === socketId) {
                     try { consumerData.consumer.close(); } catch (e) { /* already closed */ }
-                    roomState.consumers.delete(consumerId);
-                    this.workerManager.decrementConsumers(roomState.workerIndex);
+                    if (roomState.consumers.delete(consumerId)) this.workerManager.decrementConsumers(roomState.workerIndex);
                 }
             }
 
@@ -410,9 +407,9 @@ class RoomManager {
                 for (const [producerId, producer] of roomState.producers) {
                     if (producer.appData?.socketId === socketId) {
                         try { producer.close(); } catch (e) { /* already closed */ }
-                        roomState.producers.delete(producerId);
+                        const removed = roomState.producers.delete(producerId);
                         closedProducerIds.push(producerId);
-                        this.workerManager.decrementProducers(roomState.workerIndex);
+                        if (removed) this.workerManager.decrementProducers(roomState.workerIndex);
                     }
                 }
             }
@@ -478,11 +475,6 @@ class RoomManager {
         roomState.producers.forEach(p => { try { p.close(); } catch (e) { /* yoksay */ } });
         roomState.transports.forEach(t => { try { t.close(); } catch (e) { /* yoksay */ } });
         roomState.transportsById.clear();
-        roomState.pipeTransports.forEach(pipe => {
-            try { pipe.local?.close(); } catch (e) { /* yoksay */ }
-            try { pipe.remote?.close(); } catch (e) { /* yoksay */ }
-        });
-
         this.workerManager.removeRouter(roomState.workerIndex, roomId);
         database.deleteRoom(roomId);
 
@@ -508,45 +500,6 @@ class RoomManager {
         for (const t of this.pendingAdminJoin.values()) clearTimeout(t);
         this.pendingClose.clear();
         this.pendingAdminJoin.clear();
-    }
-
-    // ==================== TRANSPORT ====================
-
-    async getTransportInfo(roomId, socketId, isSender) {
-        const roomState = this.rooms.get(roomId);
-        if (!roomState) return { error: 'Oda bulunamadı' };
-
-        const socketData = this.socketRooms.get(socketId);
-        if (!socketData || socketData.roomId !== roomId) return { error: 'Odaya kayıtlı değilsiniz' };
-
-        let targetRouter = roomState.router;
-        let targetWorkerIndex = roomState.workerIndex;
-
-        if (!isSender && this.getRoomUserCount(roomId) >= PIPE_THRESHOLD) {
-            const { index } = this.workerManager.getLeastLoadedWorker();
-            if (index !== roomState.workerIndex) {
-                targetWorkerIndex = index;
-                targetRouter = await this.ensurePipeTransport(roomId, targetWorkerIndex);
-            }
-        }
-
-        return { router: targetRouter, workerIndex: targetWorkerIndex };
-    }
-
-    async ensurePipeTransport(roomId, targetWorkerIndex) {
-        const roomState = this.rooms.get(roomId);
-
-        if (roomState.pipeTransports.has(targetWorkerIndex)) {
-            return this.workerManager.getRouter(targetWorkerIndex, roomId);
-        }
-
-        const targetRouter = await this.workerManager.createRouter(targetWorkerIndex, roomId);
-        const { pipeTransport: localPipe, pipeConsumer } = await roomState.router.pipeToRouter({ router: targetRouter });
-
-        roomState.pipeTransports.set(targetWorkerIndex, { local: localPipe, consumer: pipeConsumer });
-        log.info(`🔗 PipeTransport: Worker ${roomState.workerIndex} → Worker ${targetWorkerIndex}`);
-
-        return targetRouter;
     }
 
     // ==================== STREAMING ====================

@@ -43,18 +43,18 @@ test('iyi skorda en yüksek katmanlarda kalır', () => {
     assert.deepEqual(pickLayers(10, full), { spatialLayer: 2, temporalLayer: 2 });
 });
 
-test('hafif bozulmada önce kare hızı düşer, çözünürlük korunur', () => {
-    assert.deepEqual(pickLayers(6, full), { spatialLayer: 2, temporalLayer: 1 });
+test('hafif bozulmada çözünürlük düşer, kare hızı korunur', () => {
+    assert.deepEqual(pickLayers(6, full), { spatialLayer: 1, temporalLayer: 2 });
 });
 
-test('orta bozulmada çözünürlük düşer, akıcılık geri gelir', () => {
+test('orta bozulmada hem çözünürlük hem kare hızı düşer', () => {
     const state = { ...full, spatialLayer: 2, temporalLayer: 1 };
-    assert.deepEqual(pickLayers(4, state), { spatialLayer: 1, temporalLayer: 2 });
+    assert.deepEqual(pickLayers(4, state), { spatialLayer: 1, temporalLayer: 1 });
 });
 
 test('ağır bozulmada en alt kademeye inilir', () => {
     const state = { ...full, spatialLayer: 1, temporalLayer: 2 };
-    assert.deepEqual(pickLayers(1, state), { spatialLayer: 0, temporalLayer: 1 });
+    assert.deepEqual(pickLayers(1, state), { spatialLayer: 0, temporalLayer: 0 });
 });
 
 test('katmanlar hiçbir zaman negatif olmaz', () => {
@@ -73,7 +73,7 @@ test('histerezis: sınırda skorla kalite yükseltilmez', () => {
 test('histerezis düşüşü engellemez', () => {
     // Kalite kötüleşiyorsa beklemeden inilmeli
     const state = { ...full };
-    assert.deepEqual(pickLayers(2, state), { spatialLayer: 0, temporalLayer: 1 });
+    assert.deepEqual(pickLayers(2, state), { spatialLayer: 0, temporalLayer: 0 });
 });
 
 // ==================== SKOR ====================
@@ -86,4 +86,18 @@ test('overallScore boş/bozuk girdide iyimser davranır', () => {
     assert.equal(overallScore([]), 10);
     assert.equal(overallScore(undefined), 10);
     assert.equal(overallScore([{}, { score: null }]), 10);
+});
+
+test('gerçek ConsumerScore nesnesinde izleyici skoru okunur', () => {
+    assert.equal(overallScore({ score: 2, producerScore: 10, producerScores: [10] }), 2);
+    assert.equal(overallScore({ score: 0, producerScore: 10, producerScores: [10] }), 0);
+});
+test('tek katmanda kötüleşen skor kare hızını yükseltmez', () => {
+    let state = { maxSpatialLayer: 0, maxTemporalLayer: 2, spatialLayer: 0, temporalLayer: 2 };
+    for (let score = 10; score >= 0; score--) {
+        const next = pickLayers(score, state);
+        assert.ok(next.temporalLayer <= state.temporalLayer);
+        state = { ...state, ...next };
+    }
+    assert.equal(state.temporalLayer, 0);
 });

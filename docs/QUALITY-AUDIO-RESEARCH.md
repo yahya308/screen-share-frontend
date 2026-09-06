@@ -1,3 +1,5 @@
+> Tarihsel inceleme: aşağıdaki eski codec ve tampon önerileri güncel ayarları temsil etmez. Güncel VP8 simulcast, ses ve bağlantı davranışı için [6 Eylül güncellemesine](STREAMING-UPDATE-2026-09-06.md) bakın.
+
 # VELOSTREAM — Yayın, Ses ve Oda İçi Deneyim Kalitesi Araştırma Raporu
 
 > Hazırlanan tarih: 2026-06-13

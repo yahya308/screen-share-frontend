@@ -1,0 +1,12 @@
+[Unit]
+Description=Allow only VELOSTREAM TURN TCP/TLS listener ports
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/screen-share/scripts/ensure-turn-firewall.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

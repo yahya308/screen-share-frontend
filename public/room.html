@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VELOSTREAM - Oda</title>
     <link rel="stylesheet" href="/styles.css">
-    <script src="/vendor/socket.io.min.js"></script>
+    <script src="/vendor/socket.io.min.js?v=4.8.3"></script>
     <!-- Burada `mediasoup-client` çıplak adını /vendor/ altına eşleyen bir
          import map vardı. Import map SATIR İÇİ bir script'tir: üretimdeki
          `script-src 'self'` başlığı onu engelliyor, room.js çıplak adı
@@ -65,6 +65,18 @@
 
         select option { background: #1e293b; }
         input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(14,165,233,0.3); }
+    .experience-btn { min-height:44px; padding:8px 12px; border:1px solid #475569; border-radius:9px; background:#1e293b; font-size:12px; }
+        .experience-btn:hover { background:#334155; } button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid #38bdf8; outline-offset:3px; }
+        .media-notice { color:#cbd5e1; font-size:12px; line-height:1.6; padding:8px 4px; }
+        .settings-adaptive { display:flex; align-items:center; gap:8px; font-size:12px; margin:10px 0; }
+        .speech-control { display:flex; align-items:center; gap:6px; } .speech-control input { width:64px; }
+        .stats-note { color:#94a3b8; font-size:11px; margin:6px 0 12px; }
+        body.cinema-mode #roomSidebar { display:none; } body.cinema-mode #playerShell { max-width:100%; }
+        #playerShell:fullscreen { background:#020617; padding:8px; display:flex; justify-content:center; }
+        #playerShell:fullscreen #videoContainer { flex:1; min-height:0; aspect-ratio:auto !important; }
+        #playerShell:fullscreen #viewerControls { position:absolute; bottom:12px; left:12px; right:12px; z-index:30; transition:opacity .2s; }
+        #playerShell:fullscreen.controls-idle #viewerControls:not(:focus-within) { opacity:0; pointer-events:none; }
+        @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
     </style>
 </head>
 
@@ -125,7 +137,16 @@
             <svg class="w-4 h-4 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             Bağlantı İstatistikleri
         </div>
-        <div class="grid grid-cols-2 gap-x-6 gap-y-1">
+        <p id="statsHealth" role="status">Ölçüm bekleniyor</p><p class="stats-note">Son 2 saniye · desteklenmeyen veriler ölçülemiyor olarak gösterilir. Tampon hedefi gecikme garantisi değildir.</p><div class="grid grid-cols-2 gap-x-6 gap-y-1"><div class="text-slate-400">Gönderilen / alınan:</div><div id="statsResolution" class="tabular-nums">–</div>
+<div class="text-slate-400">Seçilen hedef:</div><div id="statsSelected" class="tabular-nums">–</div>
+<div class="text-slate-400">Codec:</div><div id="statsCodec" class="tabular-nums">–</div>
+<div class="text-slate-400">İlk görüntü:</div><div id="statsFirstFrame" class="tabular-nums">–</div>
+<div class="text-slate-400">Donma / süre:</div><div id="statsFreezes" class="tabular-nums">–</div>
+<div class="text-slate-400">Kodlama / çözme:</div><div id="statsProcessing" class="tabular-nums">–</div>
+<div class="text-slate-400">Ölçülen video tamponu:</div><div id="statsBuffer" class="tabular-nums">–</div>
+<div class="text-slate-400">Hedef video tamponu:</div><div id="statsBufferTarget" class="tabular-nums">–</div>
+<div class="text-slate-400">Bağlantı yolu:</div><div id="statsRoute" class="tabular-nums">–</div>
+<div class="text-slate-400">Telafi edilen ses örneği:</div><div id="statsConcealed" class="tabular-nums">–</div>
             <div class="col-span-2 text-xs text-slate-400 font-semibold pt-1">🎬 Video</div>
             <div class="text-slate-400">Bitrate:</div><div id="statsBitrate" class="tabular-nums font-medium">-</div>
             <div class="text-slate-400">FPS:</div><div id="statsFps" class="tabular-nums font-medium">-</div>
@@ -137,6 +158,7 @@
             <div class="text-slate-400">Packet Loss:</div><div id="statsAudioLoss" class="tabular-nums font-medium">-</div>
             <div class="text-slate-400">Jitter:</div><div id="statsAudioJitter" class="tabular-nums font-medium">-</div>
         </div>
+        <button id="btnExportStats" class="experience-btn">Kalite özetini indir</button>
     </div>
 
     <!-- ==================== MAIN LAYOUT ==================== -->
@@ -144,10 +166,10 @@
         <div class="flex flex-col lg:flex-row gap-3 lg:gap-4 lg:h-[calc(100vh-3.75rem)] h-auto">
 
             <!-- ===== LEFT: VIDEO + CONTROLS ===== -->
-            <div class="flex-1 flex flex-col min-w-0">
+            <div id="playerShell" class="flex-1 flex flex-col min-w-0">
                 <!-- Video Container -->
                 <div id="videoContainer" class="bg-black rounded-xl sm:rounded-2xl overflow-hidden relative flex-shrink-0 shadow-2xl ring-1 ring-slate-700/50" style="aspect-ratio:16/9">
-                    <video id="remoteVideo" autoplay playsinline class="w-full h-full object-contain bg-black"></video>
+                    <video id="remoteVideo" autoplay playsinline muted class="w-full h-full object-contain bg-black"></video>
                     <video id="localVideo" autoplay playsinline muted class="hidden w-full h-full object-contain bg-black"></video>
 
                     <!-- Top gradient + info overlay -->
@@ -172,26 +194,33 @@
                     </div>
                 </div>
 
+                <div id="mediaStatus" class="hidden media-notice" role="status" aria-live="polite"></div>
+                <button id="btnRetryMedia" class="hidden experience-btn">Bağlantıyı yeniden kur</button>
+                <button id="btnUnlockAudio" class="hidden experience-btn">Sesi aç</button>
                 <!-- ===== VIEWER CONTROLS BAR ===== -->
                 <div id="viewerControls" class="mt-3 flex items-center gap-2 sm:gap-3 hidden flex-wrap bg-slate-800/50 backdrop-blur rounded-xl p-2 border border-slate-700/50">
-                    <button id="btnPlayPause" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn" title="Oynat/Durdur">
+                    <button id="btnPlayPause" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn" title="Oynat/Durdur (Space)" aria-label="Yayını duraklat veya canlı yayına dön">
                         <svg id="iconPlay" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                         <svg id="iconPause" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                     </button>
                     <div class="flex items-center gap-2 bg-slate-700/50 rounded-lg px-2 py-1.5">
-                        <button id="btnMute" class="hover:text-brand-400 transition-colors" title="Sesi Aç/Kapat">
+                        <button id="btnMute" class="hover:text-brand-400 transition-colors" title="Sesi Aç/Kapat (M)" aria-label="Tüm sesleri aç veya kapat" aria-pressed="false">
                             <svg id="iconVolumeOn" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" /></svg>
                             <svg id="iconVolumeOff" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" /></svg>
                         </button>
-                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1" class="w-16 sm:w-20">
+                        <label class="text-xs" for="volumeSlider">Yayın sesi</label><input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1" class="w-16 sm:w-20">
                     </div>
-                    <select id="qualitySelect" class="px-2.5 py-2 bg-slate-700/50 rounded-lg text-sm border border-slate-600/50 cursor-pointer hover:bg-slate-700 transition-colors">
+                    <label class="speech-control text-xs" for="speechVolumeSlider">Konuşma <input type="range" id="speechVolumeSlider" min="0" max="1" step="0.05" value="1"></label>
+                    <select aria-label="İzleme kalitesi" id="qualitySelect" class="px-2.5 py-2 bg-slate-700/50 rounded-lg text-sm border border-slate-600/50 cursor-pointer hover:bg-slate-700 transition-colors">
                         <option value="auto">⚡ Otomatik</option>
                         <option value="high">🎯 Yüksek</option>
                         <option value="mid">📊 Orta</option>
                         <option value="low">📉 Düşük</option>
                     </select>
-                    <button id="btnFullscreen" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn ml-auto" title="Tam Ekran">
+                    <button id="btnCinema" class="experience-btn" aria-pressed="false">Sinema</button>
+                    <button id="btnPip" class="experience-btn hidden">Küçük pencere</button>
+                    <label class="text-xs"><input id="keepAwakeToggle" type="checkbox"> Ekranı açık tut</label>
+                    <button id="btnFullscreen" class="p-2.5 bg-slate-700/50 hover:bg-slate-600 rounded-lg transition-all ctrl-btn ml-auto" title="Tam Ekran (F)" aria-label="Tam ekranı aç veya kapat">
                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
                     </button>
                 </div>
@@ -208,7 +237,7 @@
             </div>
 
             <!-- ===== RIGHT SIDEBAR ===== -->
-            <div class="w-full lg:w-72 xl:w-80 flex-shrink-0 flex flex-col gap-3 lg:overflow-y-auto sidebar-scroll pb-2 lg:pr-1">
+            <div id="roomSidebar" class="w-full lg:w-72 xl:w-80 flex-shrink-0 flex flex-col gap-3 lg:overflow-y-auto sidebar-scroll pb-2 lg:pr-1">
 
                 <!-- ===== ADMIN PANEL ===== -->
                 <div id="adminPanel" class="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700/50 hidden flex-shrink-0">
@@ -220,6 +249,13 @@
                             Yayın Kontrolleri
                         </h3>
 
+                        <div>
+                                    <label class="text-xs text-slate-400">İçerik türü</label>
+                                    <select id="contentTypeSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                        <option value="detail" selected>Metin / Sunum — netlik önce</option>
+                                        <option value="motion">Film / Video — akıcılık önce</option>
+                                    <option value="interactive">Etkileşim / Oyun — düşük gecikme</option></select>
+                                </div>
                         <!-- Quality Presets -->
                         <div class="mb-3">
                             <label class="text-xs text-slate-400 mb-1.5 block">Hazır Kalite Ayarları</label>
@@ -254,34 +290,30 @@
                                         <select id="fpsSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
                                             <option value="60">60 FPS</option>
                                             <option value="30" selected>30 FPS</option>
-                                            <option value="24">24 FPS</option>
+                                            <option value="25">25 FPS</option><option value="24">24 FPS</option>
                                             <option value="15">15 FPS</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div>
                                     <label class="text-xs text-slate-400">Max Bitrate (Kbps)</label>
-                                    <input id="bitrateInput" type="number" value="5000" step="500" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
+                                    <input id="bitrateInput" min="250" max="20000" type="number" value="5000" step="500" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
                                 </div>
-                                <div>
-                                    <label class="text-xs text-slate-400">İçerik türü</label>
-                                    <select id="contentTypeSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
-                                        <option value="detail" selected>Metin / Sunum — netlik önce</option>
-                                        <option value="motion">Video / Oyun — akıcılık önce</option>
-                                    </select>
-                                </div>
+
                                 <div>
                                     <label class="text-xs text-slate-400">Codec</label>
                                     <select id="codecSelect" class="w-full mt-0.5 px-2 py-1.5 bg-slate-700/50 rounded-lg text-xs border border-slate-600/30">
                                         <option value="vp8" selected>VP8 — dengeli (varsayılan)</option>
                                         <option value="av1">AV1 — düşük bant, CPU ister</option>
-                                        <option value="h264">H264 — donanım hızlandırma</option>
+                                        <option value="h264">H264 — cihaz desteğine bağlı</option>
                                         <option value="vp9">VP9 — ekranda önerilmez</option>
                                     </select>
-                                    <p class="text-[10px] text-slate-500 mt-1 leading-snug">Değişiklik bir sonraki yayında geçerli olur.</p>
+                                    <p class="text-[10px] text-slate-500 mt-1 leading-snug">Canlı yayında değişiklikleri Uygula düğmesiyle etkinleştirin.</p>
                                 </div>
                             </div>
-                        </details>
+                        </details><label class="settings-adaptive"><input id="adaptiveLayersToggle" type="checkbox" checked> Zayıf bağlantılar için ek görüntü katmanı</label>
+                        <p id="settingsStatus" class="media-notice" role="status">Seçilen ayarlar yayını başlatınca uygulanır.</p>
+                        <button id="btnApplySettings" class="experience-btn hidden">Değişiklikleri uygula</button>
 
                         <!-- Stream Buttons -->
                         <div class="space-y-2 mb-3">
@@ -394,7 +426,7 @@
                         <div id="chatInputArea" class="flex gap-2">
                             <input id="chatInput" type="text" placeholder="Mesajınız..." maxlength="500"
                                 class="flex-1 px-3 py-1.5 bg-slate-700/50 rounded-lg text-sm border border-slate-600/30 focus:border-brand-500 focus:outline-none transition-colors">
-                            <button id="btnSendChat" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm transition-all ctrl-btn font-medium">
+                            <button id="btnSendChat" aria-label="Mesajı gönder" class="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm transition-all ctrl-btn font-medium">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
                             </button>
                         </div>
@@ -409,7 +441,7 @@
     </div><!-- /main -->
 
     <!-- ==================== NICKNAME MODAL ==================== -->
-    <div id="nicknameModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+    <div id="nicknameModal" role="dialog" aria-modal="true" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
         <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-sm mx-4 border border-slate-700/50 shadow-2xl">
             <div class="text-center mb-5">
                 <div class="w-14 h-14 mx-auto rounded-full bg-gradient-to-br from-brand-500 to-purple-500 flex items-center justify-center mb-3">
@@ -428,7 +460,7 @@
     </div>
 
     <!-- ==================== PASSWORD MODAL ==================== -->
-    <div id="passwordModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+    <div id="passwordModal" role="dialog" aria-modal="true" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
         <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-md mx-4 border border-slate-700/50 shadow-2xl">
             <div class="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center mb-4">
                 <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -445,7 +477,7 @@
     </div>
 
     <!-- ==================== LEAVE MODAL ==================== -->
-    <div id="leaveModal" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
+    <div id="leaveModal" role="dialog" aria-modal="true" class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center z-50 modal-anim">
         <div class="bg-slate-800 rounded-2xl p-7 w-full max-w-md mx-4 border border-slate-700/50 shadow-2xl">
             <div class="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
                 <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>

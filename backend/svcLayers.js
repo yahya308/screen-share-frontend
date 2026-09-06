@@ -1,14 +1,4 @@
-/**
- * svcLayers - scalabilityMode ayrıştırma ve otomatik kalite kademesi.
- *
- * Yayıncı tek encoding ve 'L1T3' gönderiyordu: 1 uzamsal, 3 zamansal katman.
- * Sunucudaki otomatik kalite bu yüzden maxSpatialLayer=0 ile çalışıyor, sadece
- * kare hızını bir kademe düşürebiliyordu. Sonuç: bağlantısı zayıf bir izleyici
- * 1080p akışı almaya devam edip donuyordu. Doğru davranış, aynı akıcılıkta
- * daha küçük bir çözünürlüğe inmektir — VP9 SVC ('L3T3_KEY') bunu simulcast'in
- * transport karmaşıklığı olmadan sağlar.
- */
-
+// Layer limits and monotonic, hysteretic consumer quality policy.
 const SCALABILITY_MODE = /L(\d+)T(\d+)/i;
 
 /** encodings dizisinden en yüksek zamansal katman indeksini çıkar. */
@@ -65,14 +55,14 @@ function pickLayers(score, state) {
         spatial = maxSpatialLayer;
         temporal = maxTemporalLayer;
     } else if (score >= 5) {
-        spatial = maxSpatialLayer;
-        temporal = Math.max(0, maxTemporalLayer - 1);
+        spatial = Math.max(0, maxSpatialLayer - 1);
+        temporal = maxSpatialLayer > 0 ? maxTemporalLayer : Math.max(0, maxTemporalLayer - 1);
     } else if (score >= 3) {
         spatial = Math.max(0, maxSpatialLayer - 1);
-        temporal = maxTemporalLayer;
+        temporal = Math.max(0, maxTemporalLayer - 1);
     } else {
         spatial = Math.max(0, maxSpatialLayer - 2);
-        temporal = Math.max(0, maxTemporalLayer - 1);
+        temporal = 0;
     }
 
     // Histerezis: yükselme yalnızca skor açıkça iyiyken
@@ -86,6 +76,10 @@ function pickLayers(score, state) {
 
 /** mediasoup 'score' olayının dizisinden tek bir skor türet (en kötüsü). */
 function overallScore(score) {
+    // ConsumerScore is an object; ProducerScore is an array of RTP streams.
+    if (score && !Array.isArray(score) && Number.isFinite(score.score)) {
+        return Math.max(0, Math.min(10, score.score));
+    }
     const values = Array.isArray(score)
         ? score.map(s => s && s.score).filter(v => typeof v === 'number')
         : [];

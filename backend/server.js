@@ -20,6 +20,7 @@ const { getClientIp } = require('./clientIp');
 const { FRONTEND_SECURITY_HEADERS } = require('./securityHeaders');
 const metrics = require('./metrics');
 const svc = require('./svcLayers');
+const { buildIceConfig } = require('./iceConfig');
 const log = require('./logger');
 
 // IP başına oda oluşturma hızı ve soket başına lobi sorgusu hızı.
@@ -119,6 +120,13 @@ app.get('/health', (req, res) => {
  */
 app.get('/api/config', (req, res) => {
     res.status(200).json({ signalingUrl: process.env.SIGNALING_URL || '' });
+});
+
+// Local development has the same endpoint as the Vercel frontend. Production
+// clients obtain credentials over their authenticated room socket instead.
+app.get('/api/ice-config', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ iceServers: [] });
 });
 
 // ==================== LOBİ YAYINI ====================
@@ -525,7 +533,7 @@ io.on('connection', (socket) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Oda bulunamadı' }); return; }
 
-        const value = contentType === 'motion' ? 'motion' : 'detail';
+        const value = ['motion', 'interactive'].includes(contentType) ? contentType : 'detail';
         socketData.roomState.contentType = value;
         io.to(socketData.roomId).emit('content-type', { contentType: value });
 
@@ -591,6 +599,23 @@ io.on('connection', (socket) => {
 
     // ==================== MEDIASOUP EVENTS ====================
 
+    socket.on('get-ice-config', (callback) => {
+        if (typeof callback !== 'function') return;
+        if (!roomManager.getRoomFromSocket(socket.id)?.roomState) { callback({ error: 'Not in room' }); return; }
+        callback(buildIceConfig());
+    });
+
+    socket.on('video-capabilities', ({ codecs } = {}, callback) => {
+        const data = roomManager.getRoomFromSocket(socket.id);
+        if (!data?.roomState) { callback?.({ error: 'Not in room' }); return; }
+        const allowed = ['video/vp8', 'video/h264', 'video/av1', 'video/vp9'];
+        roomManager.socketRooms.get(socket.id).videoCodecs = allowed.filter(c => Array.isArray(codecs) && codecs.includes(c));
+        const common = commonViewerCodecs(data.roomId);
+        const adminId = roomManager.getConnectedAdminSocketId(data.roomId);
+        if (adminId) io.to(adminId).emit('viewer-codecs', { codecs: common });
+        callback?.({ codecs: common });
+    });
+
     socket.on('getRouterRtpCapabilities', (callback) => {
         if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
@@ -626,10 +651,11 @@ io.on('connection', (socket) => {
                 log.warn(`⚠️ Transport bitrate tuning skipped: ${e.message}`);
             }
 
+            if (!socket.connected || roomManager.getRoomFromSocket(socket.id)?.roomState !== roomState || roomState.router.closed) { transport.close(); callback({ params: { error: 'Medya oturumu kapandı' } }); return; }
             roomState.transports.set(transportKey, transport);
             roomState.transportsById.set(transport.id, transport);
 
-            transport.on('close', () => {
+            transport.observer.on('close', () => {
                 if (roomState.transports.get(transportKey) === transport) {
                     roomState.transports.delete(transportKey);
                 }
@@ -646,7 +672,7 @@ io.on('connection', (socket) => {
                     closedProducerIds.forEach(pid =>
                         socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: pid }));
                 } else {
-                    closeConsumersOwnedBySocket(roomState, socket.id, workerManager);
+                    closeConsumersOwnedBySocket(roomState, socket.id, workerManager, transport.id);
                 }
             });
 
@@ -668,7 +694,7 @@ io.on('connection', (socket) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Odaya katÄ±lmadÄ±nÄ±z' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
-        if (!transport) { callback?.({ error: 'Transport bulunamadÄ±' }); return; }
+        if (!transport || !ownsTransport(socketData.roomState, transportId, socket.id)) { callback?.({ error: 'Transport bulunamadı' }); return; }
         try {
             await transport.connect({ dtlsParameters });
             callback?.({ success: true });
@@ -678,11 +704,17 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('close-transport', ({ transportId } = {}, callback) => {
+        const data = roomManager.getRoomFromSocket(socket.id);
+        if (!data?.roomState || !ownsTransport(data.roomState, transportId, socket.id)) { callback?.({ error: 'Transport not found' }); return; }
+        findTransport(data.roomState, transportId)?.close(); callback?.({ success: true });
+    });
+
     socket.on('restartIce', async ({ transportId }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
-        if (!transport) { callback?.({ error: 'Transport not found' }); return; }
+        if (!transport || !ownsTransport(socketData.roomState, transportId, socket.id)) { callback?.({ error: 'Transport not found' }); return; }
         try {
             const iceParameters = await transport.restartIce();
             callback?.({ iceParameters });
@@ -708,7 +740,7 @@ io.on('connection', (socket) => {
 
         try {
             const transport = findTransport(socketData.roomState, transportId);
-            if (!transport) { callback({ error: 'Transport bulunamadı' }); return; }
+            if (!transport || !socketData.roomState.transports.has(`${socket.id}-send-${transportId}`)) { callback({ error: 'Transport bulunamadı' }); return; }
 
             const producer = await transport.produce({
                 kind,
@@ -718,9 +750,19 @@ io.on('connection', (socket) => {
             });
 
             if (!producer) { callback({ error: 'Producer oluşturulamadı' }); return; }
+            if (!socket.connected || roomManager.getRoomFromSocket(socket.id)?.roomState !== socketData.roomState || transport.closed) { producer.close(); callback({ error: 'Medya oturumu kapandı' }); return; }
 
             socketData.roomState.producers.set(producer.id, producer);
             workerManager.incrementProducers(socketData.roomState.workerIndex);
+            producer.observer.on('close', () => {
+                if (!socketData.roomState.producers.delete(producer.id)) return;
+                workerManager.decrementProducers(socketData.roomState.workerIndex);
+                if (producer.kind === 'video') {
+                    roomManager.setStreamingStatus(socketData.roomId, false);
+                    socket.to(socketData.roomId).emit('stream-paused');
+                }
+                socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: producer.id });
+            });
 
             producer.on('score', (score) => {
                 if (score[0]?.score < 5) log.warn(`⚠️ Low producer score: ${score[0]?.score}`);
@@ -747,7 +789,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('getProducers', (callback) => {
+    socket.on('getProducers', (options, callback) => {
+        if (typeof options === 'function') { callback = options; options = {}; }
         if (typeof callback !== 'function') return;
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback([]); return; }
@@ -755,7 +798,7 @@ io.on('connection', (socket) => {
         const ids = [];
         for (const [id, producer] of socketData.roomState.producers) {
             if (producer.appData?.socketId !== socket.id && !producer.closed) {
-                ids.push(id);
+                ids.push(options?.metadata ? { id, kind: producer.kind, source: producer.appData?.source || null } : id);
             }
         }
 
@@ -772,11 +815,11 @@ io.on('connection', (socket) => {
             const roomState = socketData.roomState;
 
             if (!roomState.router.canConsume({ producerId, rtpCapabilities })) {
-                callback({ params: { error: 'Cannot consume' } }); return;
+                callback({ params: { error: 'Bu tarayıcı yayının görüntü biçimini desteklemiyor. Yayıncı uyumlu bir codec seçmeli.', code: 'CODEC_UNSUPPORTED' } }); return;
             }
 
             const transport = findTransport(roomState, transportId);
-            if (!transport) { callback({ params: { error: 'Transport bulunamadı' } }); return; }
+            if (!transport || !ownsTransport(roomState, transportId, socket.id)) { callback({ params: { error: 'Transport bulunamadı' } }); return; }
 
             // enableRtx: mediasoup bunu vermezsen video için true, SES İÇİN FALSE
             // varsayıyor ve consumer'ın Opus codec'inden düz 'nack' geri
@@ -798,12 +841,14 @@ io.on('connection', (socket) => {
             if (consumer.kind === 'audio') await consumer.setPriority(255).catch(() => {});
             else if (consumer.kind === 'video') await consumer.setPriority(200).catch(() => {});
 
+            if (!socket.connected || roomManager.getRoomFromSocket(socket.id)?.roomState !== roomState || transport.closed || consumer.closed) { consumer.close(); callback({ params: { error: 'Medya oturumu kapandı' } }); return; }
             const encodings = consumer.rtpParameters.encodings;
             const maxSpatialLayer = svc.getMaxSpatialLayer(encodings);
             const maxTemporalLayer = svc.getMaxTemporalLayer(encodings);
 
             const consumerData = {
                 consumer,
+                transportId: transport.id,
                 socketId: socket.id,
                 autoQuality: consumer.kind === 'video' ? {
                     enabled: true,
@@ -817,6 +862,9 @@ io.on('connection', (socket) => {
 
             roomState.consumers.set(consumer.id, consumerData);
             workerManager.incrementConsumers(roomState.workerIndex);
+            consumer.observer.on('close', () => {
+                if (roomState.consumers.delete(consumer.id)) workerManager.decrementConsumers(roomState.workerIndex);
+            });
 
             if (consumer.kind === 'video') {
                 try { await consumer.setPreferredLayers({ spatialLayer: maxSpatialLayer, temporalLayer: maxTemporalLayer }); }
@@ -830,7 +878,8 @@ io.on('connection', (socket) => {
                     id: consumer.id,
                     producerId,
                     kind: consumer.kind,
-                    rtpParameters: consumer.rtpParameters
+                    rtpParameters: consumer.rtpParameters,
+                    source: roomState.producers.get(producerId)?.appData?.source || null
                 }
             });
         } catch (error) {
@@ -839,22 +888,24 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('resume', async ({ consumerId }) => {
+    socket.on('resume', async ({ consumerId }, callback) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData?.roomState) return;
+        if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData?.consumer) {
+        if (consumerData?.consumer && consumerData.socketId === socket.id) {
             try {
                 await consumerData.consumer.resume();
                 if (consumerData.consumer.kind === 'video') {
                     try { await consumerData.consumer.requestKeyFrame(); } catch (e) { /* yoksay */ }
                 }
+                callback?.({ success: true });
             } catch (error) {
                 log.warn(`⚠️ Could not resume consumer ${consumerId}: ${error.message}`);
-                socketData.roomState.consumers.delete(consumerId);
+                consumerData.consumer.close();
+                callback?.({ error: error.message });
             }
-        }
+        } else callback?.({ error: 'Consumer not found' });
     });
 
     socket.on('setPreferredLayers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
@@ -862,14 +913,14 @@ io.on('connection', (socket) => {
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData?.consumer) {
+        if (consumerData?.consumer && consumerData.socketId === socket.id) {
             try {
+                await consumerData.consumer.setPreferredLayers({ spatialLayer, temporalLayer });
                 if (consumerData.autoQuality) {
                     consumerData.autoQuality.enabled = false;
-                    consumerData.autoQuality.spatialLayer = spatialLayer;
-                    consumerData.autoQuality.temporalLayer = temporalLayer;
+                    consumerData.autoQuality.spatialLayer = consumerData.consumer.preferredLayers?.spatialLayer ?? spatialLayer;
+                    consumerData.autoQuality.temporalLayer = consumerData.consumer.preferredLayers?.temporalLayer ?? temporalLayer;
                 }
-                await consumerData.consumer.setPreferredLayers({ spatialLayer, temporalLayer });
                 callback?.({ success: true });
             } catch (error) {
                 callback?.({ error: error.message });
@@ -884,7 +935,7 @@ io.on('connection', (socket) => {
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData?.consumer && consumerData.autoQuality) {
+        if (consumerData?.consumer && consumerData.autoQuality && consumerData.socketId === socket.id) {
             try {
                 consumerData.autoQuality.enabled = true;
                 consumerData.autoQuality.lastChange = 0;
@@ -892,6 +943,8 @@ io.on('connection', (socket) => {
                     spatialLayer: consumerData.autoQuality.maxSpatialLayer,
                     temporalLayer: consumerData.autoQuality.maxTemporalLayer
                 });
+                consumerData.autoQuality.spatialLayer = consumerData.autoQuality.maxSpatialLayer;
+                consumerData.autoQuality.temporalLayer = consumerData.autoQuality.maxTemporalLayer;
                 callback?.({ success: true });
             } catch (error) {
                 callback?.({ error: error.message });
@@ -905,7 +958,7 @@ io.on('connection', (socket) => {
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) return;
         const consumerData = socketData.roomState.consumers.get(consumerId);
-        if (consumerData?.consumer) {
+        if (consumerData?.consumer && consumerData.socketId === socket.id) {
             try { await consumerData.consumer.requestKeyFrame(); } catch (e) { /* yoksay */ }
         }
     });
@@ -915,15 +968,8 @@ io.on('connection', (socket) => {
         if (!socketData?.roomState) return;
 
         const producer = socketData.roomState.producers.get(producerId);
-        if (producer) {
-            if (producer.kind === 'video') {
-                roomManager.setStreamingStatus(socketData.roomId, false);
-                socket.to(socketData.roomId).emit('stream-paused');
-            }
-            try { producer.close(); } catch (e) { /* yoksay */ }
-            socketData.roomState.producers.delete(producerId);
-            workerManager.decrementProducers(socketData.roomState.workerIndex);
-            socket.to(socketData.roomId).emit('producer-closed', { remoteProducerId: producerId });
+        if (producer && producer.appData?.socketId === socket.id) {
+            producer.close();
         }
     });
 
@@ -962,6 +1008,9 @@ async function autoAdjustConsumerLayers(consumerData, score = []) {
 function handleLeaveRoom(socket) {
     const result = roomManager.leaveRoom(socket.id);
     if (!result) return;
+    socket.leave(result.roomId);
+    const adminId = roomManager.getConnectedAdminSocketId(result.roomId);
+    if (adminId) io.to(adminId).emit('viewer-codecs', { codecs: commonViewerCodecs(result.roomId) });
 
     // Emit producer-closed for any closed viewer producers
     if (result.closedProducerIds?.length) {
@@ -989,6 +1038,20 @@ function findTransport(roomState, transportId) {
     return roomState.transportsById.get(transportId) || null;
 }
 
+function ownsTransport(roomState, transportId, socketId) {
+    return roomState.transports.has(`${socketId}-send-${transportId}`) || roomState.transports.has(`${socketId}-recv-${transportId}`);
+}
+
+function commonViewerCodecs(roomId) {
+    let codecs = ['video/vp8', 'video/h264', 'video/av1', 'video/vp9'];
+    for (const data of roomManager.socketRooms.values()) {
+        if (data.roomId !== roomId || data.role === 'admin') continue;
+        // Older clients cannot advertise AV1 support. Keep the common path safe.
+        codecs = codecs.filter(c => (data.videoCodecs || ['video/vp8', 'video/h264']).includes(c));
+    }
+    return codecs;
+}
+
 function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef, transportId = null) {
     const closedProducerIds = [];
     let hadVideo = false;
@@ -1007,11 +1070,11 @@ function closeProducersOwnedBySocket(roomState, socketId, workerManagerRef, tran
     return { closedProducerIds, hadVideo };
 }
 
-function closeConsumersOwnedBySocket(roomState, socketId, workerManagerRef) {
+function closeConsumersOwnedBySocket(roomState, socketId, workerManagerRef, transportId = null) {
     const closedConsumerIds = [];
 
     for (const [consumerId, consumerData] of [...roomState.consumers]) {
-        if (consumerData.socketId !== socketId) continue;
+        if (consumerData.socketId !== socketId || (transportId && consumerData.transportId !== transportId)) continue;
         try { consumerData.consumer.close(); } catch (e) { /* yoksay */ }
         if (roomState.consumers.delete(consumerId)) {
             workerManagerRef.decrementConsumers(roomState.workerIndex);

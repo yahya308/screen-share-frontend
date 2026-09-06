@@ -27,6 +27,8 @@ class WorkerManager {
         // index -> yeniden başlatma zamanlayıcısı. İptal edilebilir olmalı:
         // aksi halde kapanıştan sonra tetiklenip yeni bir alt süreç doğuruyor.
         this.restartTimers = new Map();
+        this.resourceTimer = null;
+        this.samplingResources = false;
     }
 
     /** Kaç worker açılacak: açık ayar > kullanılabilir paralellik > çekirdek sayısı. */
@@ -48,6 +50,8 @@ class WorkerManager {
         }
 
         log.info(`✅ ${workerCount} workers ready`);
+        this.resourceTimer = setInterval(() => void this.sampleResources(), 5000);
+        this.resourceTimer.unref?.();
         return this.workers;
     }
 
@@ -214,6 +218,7 @@ class WorkerManager {
     /** Tüm worker'ları kapat (düzgün kapanma ve testler). */
     async closeAll() {
         this.closing = true;
+        clearInterval(this.resourceTimer);
 
         for (const timer of this.restartTimers.values()) clearTimeout(timer);
         this.restartTimers.clear();
@@ -229,6 +234,23 @@ class WorkerManager {
     /**
      * Get worker stats for monitoring
      */
+    async sampleResources() {
+        if (this.samplingResources || this.closing) return;
+        this.samplingResources = true;
+        try {
+            for (const [index, data] of this.workerStats) {
+                const worker = this.workers[index]; if (!worker || worker.closed) continue;
+                try {
+                    const usage = await worker.getResourceUsage(), now = Date.now();
+                    if (this.workerStats.get(index) !== data) continue;
+                    const cpuMs = usage.ru_utime + usage.ru_stime;
+                    if (data.resourceAt && now > data.resourceAt) data.cpuPercent = Math.max(0, (cpuMs - data.cpuMs) / (now - data.resourceAt) * 100);
+                    data.cpuMs = cpuMs; data.resourceAt = now; data.rssBytes = usage.ru_maxrss * 1024;
+                } catch { /* closing worker */ }
+            }
+        } finally { this.samplingResources = false; }
+    }
+
     getStats() {
         const stats = [];
         this.workerStats.forEach((data) => {
@@ -237,7 +259,9 @@ class WorkerManager {
                 pid: data.pid,
                 consumers: data.consumers,
                 producers: data.producers,
-                rooms: data.routers.size
+                rooms: data.routers.size,
+                cpuPercent: data.cpuPercent,
+                rssBytes: data.rssBytes
             });
         });
         return stats.sort((a, b) => a.index - b.index);

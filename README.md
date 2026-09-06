@@ -25,10 +25,13 @@ transkodlama yok, yayıncının yükü izleyici sayısıyla artmaz.
 
 ---
 
+6 Eylül 2026 medya güncellemesinin teknik ayrıntıları, test kapsamı ve yalnızca
+VELOSTREAM'e yönelik dağıtım adımları: [güncelleme kaydı](docs/STREAMING-UPDATE-2026-09-06.md).
+
 ## Ne yapar
 
 **Yayıncı (oda sahibi)**
-- Ekran paylaşımı: 144p–1080p, 24–60 FPS, 1–20 Mbps ayarlanabilir
+- Ekran paylaşımı: 240p–1080p, 15–60 FPS, 0,25–20 Mbps ayarlanabilir
 - Sistem sesi ve mikrofon ayrı ayrı açılıp kapanabilir; mikrofonda gürültü
   bastırma anahtarı ve canlı seviye göstergesi var
 - Odayı parolayla kilitleme, izleyici mikrofonunu ve sohbeti kapatma
@@ -36,10 +39,14 @@ transkodlama yok, yayıncının yükü izleyici sayısıyla artmaz.
 
 **İzleyici**
 - Tek tıkla katılım, takma adla giriş
-- Otomatik kalite: bağlantı zayıfladığında sunucu önce kare hızını, sonra
-  çözünürlüğü kademeli düşürür (VP9 SVC)
+- Otomatik kalite: uygun VP8 yayınlarında ana görüntü ve 360p yardımcı
+  görüntü bulunur. Zayıf bağlantıda önce çözünürlük düşer; CPU zorlanırsa
+  yayıncı tek katmana döner. Toplam bitrate iki katman arasında paylaşılır
 - İzin verildiyse mikrofonla konuşma, konuşma göstergesi (VAD)
-- Sohbet, izleyici listesi
+- Yayın ve konuşma için ayrı ses seviyeleri, sinema görünümü, desteklenen
+  tarayıcılarda küçük pencere ve ekranı açık tutma
+- Manuel duraklatmada yayın sesi de durur; devam canlı yayına döner
+- Sohbet, izleyici listesi; Space/M/F kısayolları yazı alanlarında çalışmaz
 
 **Ortak**
 - Mobil tarayıcı desteği (izleyici modu birincil; ekran paylaşımı tarayıcı
@@ -85,7 +92,7 @@ yeniden başlatıldığında canlı oda kalmaz — bu bilinçli bir tercih, tek
 örnekli dağıtımı basit tutuyor. Çok örnekli bir kurulum isteniyorsa oda
 durumunun Redis'e taşınması gerekir.
 
-Oda sahibi bağlantısını kaybederse oda 5 saniyelik bir süre boyunca ayakta
+Oda sahibi bağlantısını kaybederse oda 45 saniyelik bir süre boyunca ayakta
 kalır; bu süre içinde token'ıyla dönerse oda kaldığı yerden devam eder.
 
 ---
@@ -305,15 +312,15 @@ eder; tek bir yayının izleyicileri arasında paylaşılmaz. Dolayısıyla oda
 başına tavan, bir worker'ın taşıyabildiği consumer sayısıdır ve bu; çözünürlük,
 kare hızı ve bit hızıyla doğrudan değişir.
 
-Depoda çok worker'lı dağıtım için `pipeToRouter` iskeleti mevcut
-(`RoomManager.ensurePipeTransport`) ama **bağlı değil** — bkz. bilinen sınırlar.
+Worker CPU yüzdesi ve tepe bellek ölçümleri `/metrics` üzerinden izlenebilir.
+Çalışmayan pipe iskeleti kaldırıldı; tek odayı birden çok worker'a dağıtma
+özelliği için gerçek medya yüküyle ayrıca kapasite çalışması gerekir.
 
 ---
 
 ## Bilinen sınırlar
 
-- **Oda başına tek worker.** `getTransportInfo`/`ensurePipeTransport` yazılmış
-  ama çağrılmıyor; bir odanın izleyicileri ek çekirdeklere dağıtılamıyor.
+- **Oda başına tek worker.** Bir odanın izleyicileri ek çekirdeklere dağıtılamıyor.
 - **Yeniden başlatma odaları kapatır.** Oda durumu bellekte; çok örnekli
   dağıtım için Redis gerekir.
 - **Kayıt (recording) yok.**

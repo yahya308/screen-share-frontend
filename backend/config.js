@@ -11,8 +11,8 @@ module.exports = {
     mediasoup: {
         // Worker settings
         worker: {
-            rtcMinPort: 40000,  // ⭐ Optimized port range start
-            rtcMaxPort: 49999,  // ⭐ 10,000 ports for ~2,500-5,000 concurrent connections
+            rtcMinPort: Number(process.env.RTC_MIN_PORT) || 40000,
+            rtcMaxPort: Number(process.env.RTC_MAX_PORT) || 44999,
             logLevel: 'warn',
             logTags: [
                 'info',
@@ -118,14 +118,10 @@ module.exports = {
                 }
             ],
             maxIncomingBitrate: 50000000, // 50 Mbps for high quality
-            initialAvailableOutgoingBitrate: 10000000, // ⭐ 10 Mbps start for instant quality
+            initialAvailableOutgoingBitrate: 1000000,
             enableUdp: true,
             enableTcp: true,
-            preferUdp: true,
-            // ⭐ Smooth streaming optimizations
-            // Düşürüldü: 3 Mbps taban, zayıf/mobil bağlantıda mediasoup'un adaptive
-            // bandwidth control'üne engel oluyordu ve paket kaybına yol açıyordu.
-            minimumAvailableOutgoingBitrate: 1500000  // 1.5 Mbps taban (uyumlu adaptasyon)
+            preferUdp: true
         }
     },
 

@@ -1,0 +1,23 @@
+# Explicit VELOSTREAM-only overlay. See docs/STREAMING-UPDATE-2026-09-06.md.
+services:
+  mediasoup:
+    env_file:
+      - ./.turn/backend.env
+  turn:
+    image: coturn/coturn:4.17.2-r0@sha256:aa68aab64a3b929d57fc2924c98ea447bf996cf8dade2508e7b71eaf23f1f14e
+    container_name: velostream-turn
+    restart: unless-stopped
+    network_mode: host
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    cpus: 1.0
+    mem_limit: 384m
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/lib/coturn:size=16m
+    volumes:
+      - ./.turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./.turn/certs:/etc/coturn/certs:ro
