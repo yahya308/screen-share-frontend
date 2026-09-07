@@ -26,8 +26,9 @@ try {
     process.exit(1);
 }
 
-const BASE = process.env.BASE || 'http://localhost:3100';
+const BASE = (process.env.BASE || 'http://localhost:3100').replace(/\/$/, '');
 const RELAY = process.env.FORCE_RELAY === '1';
+let activeBrowser;
 const results = [];
 function check(name, ok, detail = '') {
     results.push({ name, ok, detail });
@@ -122,6 +123,7 @@ async function captureRtcStats(target) {
         executablePath: process.env.CHROMIUM_PATH || undefined,
         args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows']
     });
+    activeBrowser = browser;
     const context = await browser.newContext();
     const errors = [];
     let offlineProbe = false;
@@ -150,6 +152,9 @@ async function captureRtcStats(target) {
     // ---------- 1. Lobi ----------
     await page.goto(`${BASE}/index.html`, { waitUntil: 'networkidle' });
     check('lobi sayfası yüklendi', await page.title() !== '');
+    const frontendOrigin = new URL(page.url()).origin;
+    const config = await page.evaluate(() => fetch('/api/config').then(r => r.json()));
+    const signalingOrigin = new URL(config.signalingUrl || frontendOrigin, frontendOrigin).origin;
 
     // Tailwind derlenmiş CSS gerçekten uygulanmış mı?
     const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundImage);
@@ -167,7 +172,11 @@ async function captureRtcStats(target) {
     const externalRequests = [];
     page.on('request', (r) => {
         const u = r.url();
-        if (!u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:')) externalRequests.push(u);
+        if (u.startsWith('data:') || u.startsWith('blob:')) return;
+        const url = new URL(u);
+        // Vercel uses a separate, explicitly configured signaling origin.
+        const signalingRequest = url.origin === signalingOrigin && url.pathname.startsWith('/socket.io/');
+        if (url.origin !== frontendOrigin && !signalingRequest) externalRequests.push(u);
     });
 
     // ---------- 2. Oda oluştur ----------
@@ -177,7 +186,7 @@ async function captureRtcStats(target) {
     await page.fill('#roomMaxUsers', '20');
     await page.click('#btnConfirmCreate');
 
-    await page.waitForURL(/room\.html\?roomId=.*admin=true/, { timeout: 15000 });
+    await page.waitForURL(/\/room(?:\.html)?\?roomId=.*admin=true/, { timeout: 15000 });
     const roomUrl = page.url();
     const roomId = new URL(roomUrl).searchParams.get('roomId');
     check('oda oluştu ve yönetici olarak yönlendirildi', !!roomId, roomId);
@@ -461,4 +470,8 @@ async function captureRtcStats(target) {
     const failed = results.filter(r => !r.ok);
     console.log(`\n${results.length - failed.length}/${results.length} kontrol geçti`);
     process.exit(failed.length ? 1 : 0);
-})().catch((e) => { console.error('DUMAN TESTİ ÇÖKTÜ:', e); process.exit(2); });
+})().catch(async (e) => {
+    console.error('DUMAN TESTİ ÇÖKTÜ:', e);
+    await activeBrowser?.close();
+    process.exit(2);
+});
