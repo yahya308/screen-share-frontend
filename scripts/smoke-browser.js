@@ -399,7 +399,7 @@ async function captureRtcStats(target) {
     const late = await context.newPage(); await captureRtcStats(late);
     await late.goto(BASE + '/room.html?roomId=' + roomId + (RELAY ? '&relay=1' : ''));
     await late.fill('#nicknameInput', 'gecizleyici'); await late.click('#btnConfirmNickname');
-    await late.waitForTimeout(4000);
+    await late.waitForFunction(() => window.__jitterTargets().length >= 2, null, { timeout: 15000 });
     const lateTargets = await late.evaluate(() => window.__jitterTargets());
     check('sonradan gelen görüntü ve ses film tamponunu alır', lateTargets.length >= 2 && lateTargets.every(value => value >= 400), JSON.stringify(lateTargets));
     await late.close();
