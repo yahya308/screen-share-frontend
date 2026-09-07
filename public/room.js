@@ -1211,7 +1211,8 @@ async function startStream() {
         // Capture starts within the click gesture, before signaling awaits.
         stream = await navigator.mediaDevices.getDisplayMedia({
             video: { width: { ideal: settings.width, max: 1920 }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } },
-            audio: true, preferCurrentTab: true, selfBrowserSurface: 'exclude', surfaceSwitching: 'include'
+            // Excluding this tab must not also ask Chrome to prefer this tab.
+            audio: true, selfBrowserSurface: 'exclude', surfaceSwitching: 'include'
         });
         if (revision !== screenRevision) { stream.getTracks().forEach(t => t.stop()); return; }
         systemAudioWanted = true; simulcastFallback = false;
