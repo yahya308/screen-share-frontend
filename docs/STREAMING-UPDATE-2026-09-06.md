@@ -68,3 +68,11 @@ Gerçek ekranda içerik/sistem sesi desteği işletim sistemi ve tarayıcıya ba
 - Geçici `velostream-staging-20260906` konteyneri kimliği doğrulanıp kaldırıldı. Yerel SSH süreç kontrolünde açık test tüneli kalmadığı görüldü. Temizlik sonrası backend sağlık kontrolü tekrar başarılı; diğer 18 konteynerin başlangıç zamanları yine aynı.
 - Kalıcı yedekler `/opt/screen-share/.releases/final-media-20260906/` içinde: `source-before.tar`, `rollback-image.tar.gz`, `deployed-image.tar.gz`, `images.sha256` ve dağıtım öncesi/sonrası konteyner kayıtları. Her iki imaj arşivi gzip ve SHA-256 kontrolünden geçti.
 - Önceki Docker imajı 7 Eylül kontrolünde mevcut değildi. Bu nedenle `3a1a754` kaynak yedeği ayrı dizinde yeniden derlendi; çalışan servislere dokunulmadı. Geri dönüş imajı `sha256:ce317ef417cd8ae99d6ac4b5857188ff0fbb633b629aa5988ad9b62d22de992c`. Bu, önceki kaynaklardan yeniden derlenmiş imajdır; eski üretim ikilisinin birebir kopyası değildir. Gerektiğinde `docker load -i rollback-image.tar.gz` ile yalnızca bu imaj geri yüklenebilir.
+
+## Ekran seçici düzeltmesi — 7 Eylül 2026
+
+Kullanıcının bildirdiği `Self-contradictory configuration` hatası gerçek Chrome çağrısında yeniden üretildi. `preferCurrentTab: true` kaldırıldı; VELOSTREAM sekmesini paylaşım listesinden dışlayan `selfBrowserSurface: 'exclude'` korundu. Bu ikisi Chrome tarafından birlikte kabul edilmez. [Chrome ekran paylaşımı seçenekleri](https://developer.chrome.com/docs/web-platform/screen-sharing-controls#selfBrowserSurface).
+
+Önceki canvas medya testi ekran seçicinin seçenek doğrulamasını atlıyordu. Seçenekler artık uygulamanın ve native tarayıcı testinin paylaştığı `screenCaptureOptions` fonksiyonunda tutuluyor. `scripts/test-display-capture.js`, Chrome'un sahte ekran cihazıyla gerçek `getDisplayMedia` API'sini çağırır: 720p/30 ve 1080p/60 istekleri canlı video izi üretir; bildirilen çelişki bilinçli eklendiğinde `TypeError` alınır. Üç kontrol yerelde geçti ve aynı test CI tarayıcı işine eklendi. Bu test masaüstü içeriğini kaydetmez ve fiziksel cihaz performans ölçümü değildir.
+
+Çalıştırma: `node scripts/test-display-capture.js` (Windows'ta `CHROMIUM_PATH` kurulu Chrome yoluna ayarlanabilir). Kontrollü FPS/ses kullanan mevcut SFU medya testi ayrıca çalıştırılır.

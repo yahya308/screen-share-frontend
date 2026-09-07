@@ -266,9 +266,9 @@ async function captureRtcStats(target) {
     // Sebep yanlış bir scalabilityMode'du: kodlayıcı hiç çalışmıyordu. Hiçbir
     // birim testi bunu göremez; ancak gerçek kodlayıcı + gerçek SFU ile ölçülür.
     //
-    // Ekran seçici otomatikleştirilemediği için getDisplayMedia'yı hareketli bir
-    // canvas ile değiştiriyoruz. Kaynağın ötesindeki her şey (codec seçimi,
-    // scalabilityMode, produce, SFU, consume, decode) gerçek koddur.
+    // Ekran seçici seçenekleri test-display-capture.js içinde gerçek Chrome
+    // API'siyle sınanır. Bu medya testinde kontrollü FPS/ses için canvas
+    // kullanılır; produce, SFU, consume ve decode gerçek koddur.
     await page.bringToFront();
 
 

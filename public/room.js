@@ -7,7 +7,7 @@
 // bir import map gerektiriyordu; onu da üretimdeki `script-src 'self'` engelliyor
 // ve bu modül hiç çalışmıyordu (bkz. room.html'deki not).
 import { Device } from '/vendor/mediasoup-client.esm.js?v=3.18.1';
-import { screenSettings, screenEncodings, preferredLayers, layerLimits, playoutTarget, audioLevel, canUseShortcut, RtcSampler } from './media-policy.mjs';
+import { screenSettings, screenCaptureOptions, screenEncodings, preferredLayers, layerLimits, playoutTarget, audioLevel, canUseShortcut, RtcSampler } from './media-policy.mjs';
 
 // ==================== URL PARAMS ====================
 
@@ -1209,11 +1209,7 @@ async function startStream() {
     try {
         const settings = screenSettings(resSelect.value, fpsSelect.value, bitrateInput.value);
         // Capture starts within the click gesture, before signaling awaits.
-        stream = await navigator.mediaDevices.getDisplayMedia({
-            video: { width: { ideal: settings.width, max: 1920 }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } },
-            // Excluding this tab must not also ask Chrome to prefer this tab.
-            audio: true, selfBrowserSurface: 'exclude', surfaceSwitching: 'include'
-        });
+        stream = await navigator.mediaDevices.getDisplayMedia(screenCaptureOptions(settings));
         if (revision !== screenRevision) { stream.getTracks().forEach(t => t.stop()); return; }
         systemAudioWanted = true; simulcastFallback = false;
         localVideo.srcObject = stream;

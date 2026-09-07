@@ -8,6 +8,14 @@ export function screenSettings(height, fps, kbps) {
     return { height, width: Math.round(height * 16 / 9), fps, bitrateBps: Math.round(kbps * 1000) };
 }
 
+export function screenCaptureOptions(settings) {
+    return {
+        video: { width: { ideal: settings.width, max: 1920 }, height: { ideal: settings.height, max: settings.height }, frameRate: { ideal: settings.fps, max: settings.fps } },
+        // Excluding this tab must not also ask Chrome to prefer this tab.
+        audio: true, selfBrowserSurface: 'exclude', surfaceSwitching: 'include'
+    };
+}
+
 export function screenEncodings(settings, mimeType, adaptive = true) {
     const { height, fps, bitrateBps } = settings;
     const temporal = /h264/i.test(mimeType) ? {} : { scalabilityMode: 'L1T3' };

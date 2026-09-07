@@ -52,6 +52,8 @@ jobs:
       - run: npm ci && npm --prefix backend ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
+      - name: Chrome ekran seçici seçenekleri
+        run: node scripts/test-display-capture.js
       - name: Yayın, kalite, duraklatma ve yeniden bağlantı
         run: |
           mkdir -p build
