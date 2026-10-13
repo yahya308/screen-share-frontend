@@ -37,7 +37,24 @@ esbuild.buildSync({
 });
 console.log('✅ vendor/mediasoup-client.esm.js');
 
-for (const file of ['socket.io.min.js', 'mediasoup-client.esm.js']) {
+// Mikrofon gürültü engelleme: GTCRN'i saran AudioWorklet işlemcisi ve model.
+// Worklet modülü ayrı bir global kapsamda çalışır; içe aktarımları olmayan
+// tek bir ESM dosyası olmalı. Model (wasm) ana iş parçacığında bir kez
+// indirilip worklet'e aktarılır.
+esbuild.buildSync({
+    entryPoints: [path.join(__dirname, 'vendor', 'noise-suppressor-worklet.js')],
+    bundle: true,
+    format: 'esm',
+    minify: true,
+    target: 'es2020',
+    outfile: path.join(vendorDir, 'noise-suppressor.worklet.js'),
+    logLevel: 'warning'
+});
+console.log('✅ vendor/noise-suppressor.worklet.js');
+fs.copyFileSync(path.join(root, 'node_modules', '@sapphi-red', 'gtcrn-wasm', 'dist', 'gtcrn.wasm'), path.join(vendorDir, 'gtcrn.wasm'));
+console.log('✅ vendor/gtcrn.wasm');
+
+for (const file of ['socket.io.min.js', 'mediasoup-client.esm.js', 'noise-suppressor.worklet.js', 'gtcrn.wasm']) {
     const size = fs.statSync(path.join(vendorDir, file)).size;
     console.log(`   ${file}: ${(size / 1024).toFixed(0)} KB`);
 }

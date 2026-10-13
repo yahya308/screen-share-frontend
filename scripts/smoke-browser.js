@@ -421,6 +421,48 @@ async function captureRtcStats(target) {
     await page.click('#btnToggleMic'); await viewer.click('#btnViewerMic'); await viewer.waitForTimeout(2500);
     check('yayıncı ve izleyici mikrofonları ayrı bağlantılarda yayınlanır', await page.evaluate(() => window.__pcs.filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getSenders()).filter(sender => sender.track?.kind === 'audio').length >= 2) && await viewer.evaluate(() => window.__pcs.filter(pc => pc.connectionState !== 'closed').flatMap(pc => pc.getSenders()).some(sender => sender.track?.kind === 'audio')));
     check('konuşma sesi filmden kısa tampon kullanır', (await viewer.evaluate(() => window.__jitterTargets())).includes(80));
+    // Gürültü engelleme: arayüzdeki aç/kapa anahtarı. Varsayılan açık (yapay
+    // zekâ). Açık mikrofonda anahtar değişince producer'daki iz yenilenmeli ve
+    // gönderilen ses gerçekten değişmeli.
+    check('mikrofonlar yapay zekâ gürültü engellemesinden geçer', (await page.textContent('#adminNoiseStatus')).includes('Yapay zekâ') && (await viewer.textContent('#viewerNoiseStatus')).includes('Yapay zekâ'));
+    // Mikrofon ayrı transport'ta: video taşımayan bağlantıdaki ses göndericisi
+    // (yayıncıda sistem sesi video ile aynı bağlantıda).
+    const micSenderTrack = () => {
+        const pc = window.__pcs.filter(p => p.connectionState !== 'closed').find(p => p.getSenders().some(s => s.track?.kind === 'audio') && !p.getSenders().some(s => s.track?.kind === 'video'));
+        const track = pc?.getSenders().find(sender => sender.track?.kind === 'audio')?.track;
+        return track ? { id: track.id, state: track.readyState, ns: track.getSettings().noiseSuppression } : null;
+    };
+    for (const [target, role] of [[viewer, 'viewer'], [page, 'admin']]) {
+        const toggle = `#${role}NoiseSuppressionToggle`, status = `#${role}NoiseStatus`;
+        const before = await target.evaluate(micSenderTrack);
+        await target.click(`label:has(${toggle})`);
+        await target.waitForFunction(sel => document.querySelector(sel).textContent.includes('kapalı'), status, { timeout: 10000 });
+        const off = await target.evaluate(micSenderTrack);
+        const offChecked = await target.isChecked(toggle);
+        await target.click(`label:has(${toggle})`);
+        await target.waitForFunction(sel => document.querySelector(sel).textContent.includes('Yapay zekâ'), status, { timeout: 10000 });
+        const on = await target.evaluate(micSenderTrack);
+        check(`${role} anahtarı kapatınca gürültü engelleme kapanır, açınca yapay zekâ geri gelir`,
+            !offChecked && await target.isChecked(toggle) && off?.state === 'live' && off.ns === false && off.id !== before?.id && on?.state === 'live' && on.id !== off.id,
+            JSON.stringify({ before, off, on }));
+    }
+    check('anahtar tercihi kalıcı', await viewer.evaluate(() => localStorage.getItem('velo_mic_noise_suppression')) === 'true');
+    // Model yüklenemeyen cihaz: mikrofon yine açılmalı ve tarayıcının gürültü
+    // engellemesi GERÇEKTEN devreye girmeli. Chrome aynı cihazdan ikinci izi eski
+    // izin ayarıyla veriyor; eski iz bırakılmadan istenirse engelleme açılmıyordu.
+    const fallbackContext = await browser.newContext();
+    await fallbackContext.route('**/vendor/gtcrn.wasm*', route => route.fulfill({ status: 404, body: '' }));
+    const fallbackViewer = await fallbackContext.newPage();
+    await captureRtcStats(fallbackViewer);
+    await fallbackViewer.goto(BASE + '/room.html?roomId=' + roomId + (RELAY ? '&relay=1' : ''));
+    await fallbackViewer.fill('#nicknameInput', 'yedekizleyici'); await fallbackViewer.click('#btnConfirmNickname');
+    await fallbackViewer.waitForTimeout(2500);
+    await fallbackViewer.click('#btnViewerMic');
+    await fallbackViewer.waitForFunction(() => document.getElementById('viewerNoiseStatus').textContent.includes('Tarayıcı'), null, { timeout: 15000 }).catch(() => {});
+    const fallbackTrack = await fallbackViewer.evaluate(micSenderTrack);
+    const fallbackStatus = await fallbackViewer.textContent('#viewerNoiseStatus');
+    check('model yüklenemezse mikrofon tarayıcının gürültü engellemesiyle açılır', fallbackTrack?.state === 'live' && fallbackTrack.ns === true && fallbackStatus.includes('başlatılamadı'), JSON.stringify({ fallbackTrack, fallbackStatus }));
+    await fallbackContext.close();
     // Loss of signaling must replace stale transports and reuse live capture.
     offlineProbe = true; await context.setOffline(true);
     await page.evaluate(() => window.__dropSignaling()); await viewer.evaluate(() => window.__dropSignaling());

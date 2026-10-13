@@ -47,7 +47,10 @@ test('backend, Vercel ile aynı güvenlik başlıklarını gönderir', (t) => {
 
 test('hiçbir sayfa satır içi <script> içermez', () => {
     const csp = FRONTEND_SECURITY_HEADERS['Content-Security-Policy'];
-    assert.match(csp, /script-src 'self'(;|$)/, 'script-src gevşetilmiş; bu test artık anlamsız');
+    // 'wasm-unsafe-eval' yalnızca WebAssembly derlemesini açar (gürültü
+    // engelleme modeli); satır içi script ve eval() hâlâ engelli.
+    assert.match(csp, /script-src 'self'( 'wasm-unsafe-eval')?(;|$)/, 'script-src gevşetilmiş; bu test artık anlamsız');
+    assert.doesNotMatch(csp, /script-src[^;]*'unsafe-(inline|eval)'/, 'script-src satır içi script ya da eval açıyor');
 
     const pages = fs.readdirSync(publicDir).filter(f => f.endsWith('.html'));
     assert.ok(pages.length > 0, 'public/ altında HTML sayfası bulunamadı');

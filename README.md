@@ -32,8 +32,9 @@ VELOSTREAM'e yönelik dağıtım adımları: [güncelleme kaydı](docs/STREAMING
 
 **Yayıncı (oda sahibi)**
 - Ekran paylaşımı: 240p–1080p, 15–60 FPS, 0,25–20 Mbps ayarlanabilir
-- Sistem sesi ve mikrofon ayrı ayrı açılıp kapanabilir; mikrofonda gürültü
-  bastırma anahtarı ve canlı seviye göstergesi var
+- Sistem sesi ve mikrofon ayrı ayrı açılıp kapanabilir; mikrofonda yapay
+  zekâ ile gürültü engelleme anahtarı (GTCRN, tarayıcıda çalışır;
+  [ayrıntılar](docs/NOISE-SUPPRESSION-2026-10-13.md)) ve canlı seviye göstergesi var
 - Odayı parolayla kilitleme, izleyici mikrofonunu ve sohbeti kapatma
 - Kullanıcı atma (kick) ve IP bazlı yasaklama (ban)
 
@@ -42,7 +43,8 @@ VELOSTREAM'e yönelik dağıtım adımları: [güncelleme kaydı](docs/STREAMING
 - Otomatik kalite: uygun VP8 yayınlarında ana görüntü ve 360p yardımcı
   görüntü bulunur. Zayıf bağlantıda önce çözünürlük düşer; CPU zorlanırsa
   yayıncı tek katmana döner. Toplam bitrate iki katman arasında paylaşılır
-- İzin verildiyse mikrofonla konuşma, konuşma göstergesi (VAD)
+- İzin verildiyse mikrofonla konuşma (yayıncıyla aynı gürültü engelleme),
+  konuşma göstergesi (VAD)
 - Yayın ve konuşma için ayrı ses seviyeleri, sinema görünümü, desteklenen
   tarayıcılarda küçük pencere ve ekranı açık tutma
 - Manuel duraklatmada yayın sesi de durur; devam canlı yayına döner

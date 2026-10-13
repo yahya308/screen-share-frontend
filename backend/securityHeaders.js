@@ -10,10 +10,13 @@
  * Kaynak doğruluk noktası kökteki vercel.json'dır; buradaki kopya backend
  * imajının derleme bağlamında o dosya bulunmadığı için var. securityHeaders
  * testi ikisinin ayrışmadığını doğruluyor.
+ *
+ * 'wasm-unsafe-eval' yalnızca WebAssembly derlemesine izin verir (mikrofon
+ * gürültü engelleme modeli); satır içi script'e ve eval()'e izin VERMEZ.
  */
 
 const FRONTEND_SECURITY_HEADERS = {
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; font-src 'self'; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; font-src 'self'; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',

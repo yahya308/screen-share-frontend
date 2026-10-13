@@ -15,6 +15,7 @@
     "smoke": "node scripts/smoke-browser.js"
   },
   "devDependencies": {
+    "@sapphi-red/gtcrn-wasm": "0.0.3",
     "esbuild": "^0.25.12",
     "eslint": "^8.57.0",
     "mediasoup-client": "^3.18.1",
