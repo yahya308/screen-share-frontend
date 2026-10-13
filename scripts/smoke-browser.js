@@ -459,6 +459,8 @@ async function captureRtcStats(target) {
     await fallbackViewer.waitForTimeout(2500);
     await fallbackViewer.click('#btnViewerMic');
     await fallbackViewer.waitForFunction(() => document.getElementById('viewerNoiseStatus').textContent.includes('Tarayıcı'), null, { timeout: 15000 }).catch(() => {});
+    // Durum satırı iz alınınca güncellenir; producer uzak sunucuda biraz sonra kurulur.
+    await fallbackViewer.waitForFunction(() => window.__pcs.filter(p => p.connectionState !== 'closed').some(p => p.getSenders().some(s => s.track?.kind === 'audio')), null, { timeout: 15000 }).catch(() => {});
     const fallbackTrack = await fallbackViewer.evaluate(micSenderTrack);
     const fallbackStatus = await fallbackViewer.textContent('#viewerNoiseStatus');
     check('model yüklenemezse mikrofon tarayıcının gürültü engellemesiyle açılır', fallbackTrack?.state === 'live' && fallbackTrack.ns === true && fallbackStatus.includes('başlatılamadı'), JSON.stringify({ fallbackTrack, fallbackStatus }));

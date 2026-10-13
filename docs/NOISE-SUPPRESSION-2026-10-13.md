@@ -108,3 +108,23 @@ düşer. `vercel.json` ve `backend/securityHeaders.js` birlikte güncellendi.
   modelden geçer; anahtar açık mikrofonda kapatılıp açılınca gönderilen iz
   değişir ve tarayıcı NS'i kapalıdır; tercih kalıcıdır; model indirilemeyen
   izleyicide mikrofon tarayıcı NS'i GERÇEKTEN açık olarak yayınlanır.
+
+## Dağıtım — 13 Ekim 2026
+
+- Ön yüz: `main` → Vercel. Canlıda CSP `'wasm-unsafe-eval'` içeriyor; model,
+  worklet, `mic-processing.mjs` ve `room.js` yerel derlemeyle birebir aynı.
+- Backend (Oracle, `/opt/screen-share`): dağıtım anında 0 oda / 0 kullanıcı.
+  Yeni imaj `screen-share-mediasoup` (`sha256:8bf487655a01…`) içinde gerçek
+  worker'larla **125/125** test geçti (`.releases/noise-20261013/tests.log`;
+  entegrasyon testlerinin istemcisi geçici konteynere ayrıca kuruldu, imaja
+  girmedi). Yalnızca `mediasoup` servisi yeniden oluşturuldu
+  (`up -d --no-deps mediasoup`); diğer 22 konteynerin başlangıç zamanı aynı
+  (`started-before.txt` / `started-after.txt`).
+- Canlı sitede duman testi **48/48**. Canlı SFU üzerinden anahtar ölçümü (fan
+  gürültüsü, izleyicide/yayıncıda duyulan ses): kapalı −30 dB, açık −82 dB
+  gürültü tabanı; yayıncı ve izleyici için, mikrofon açılmadan önce ve açıkken.
+- Geri dönüş: önceki imaj `velostream-rollback:20261013`
+  (`sha256:5e719f58a660…`, arşivi `.releases/final-media-20260906/deployed-image.tar.gz`),
+  önceki kaynak `.releases/noise-20261013/source-before.tar`. Ön yüz ve backend
+  birlikte geri alınmalı: önceki ön yüzün CSP'sinde `'wasm-unsafe-eval'` yok,
+  ama bu yalnızca modeli devre dışı bırakır (tarayıcı NS'ine düşülür), ses kesilmez.
