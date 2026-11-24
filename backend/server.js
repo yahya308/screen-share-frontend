@@ -158,7 +158,12 @@ function flushRoomUpdates() {
     const updates = [];
     for (const roomId of pendingRoomUpdates) {
         if (roomManager?.rooms.has(roomId)) {
-            updates.push({ id: roomId, userCount: roomManager.getRoomUserCount(roomId) });
+            const room = database.getRoom(roomId);
+            updates.push({
+                id: roomId,
+                userCount: roomManager.getRoomUserCount(roomId),
+                ...(room ? { max_users: room.max_users } : {})
+            });
         }
     }
     pendingRoomUpdates.clear();
@@ -191,6 +196,11 @@ function sanitizeChatMessage(msg) {
     return msg.trim().slice(0, 500);
 }
 
+/** Normalize arbitrary socket payload to a plain object so null/primitive inputs never throw. */
+function asObject(payload) {
+    return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+}
+
 // ==================== SOCKET HANDLERS ====================
 
 io.on('connection', (socket) => {
@@ -216,8 +226,9 @@ io.on('connection', (socket) => {
         callback(roomManager.getAllRooms());
     });
 
-    socket.on('create-room', async ({ name, password, maxUsers }, callback) => {
+    socket.on('create-room', async (payload, callback) => {
         if (typeof callback !== 'function') return;
+        const { name, password, maxUsers } = asObject(payload);
 
         const quota = createRoomLimiter.consume(clientIp || socket.id);
         if (!quota.allowed) {
@@ -243,7 +254,7 @@ io.on('connection', (socket) => {
 
         io.to(LOBBY_ROOM).emit('room-created', {
             id: result.roomId, name, is_locked: !!password,
-            userCount: 1, max_users: maxUsers || 100
+            userCount: 1, max_users: result.maxUsers || maxUsers || 100
         });
 
         roomManager.startOrphanTimeout(result.roomId, (roomId) => {
@@ -252,8 +263,9 @@ io.on('connection', (socket) => {
     });
 
     // Admin rejoin after page redirect
-    socket.on('admin-rejoin', async ({ roomId, nickname, adminToken }, callback) => {
+    socket.on('admin-rejoin', async (payload, callback) => {
         if (typeof callback !== 'function') return;
+        const { roomId, nickname, adminToken } = asObject(payload);
 
         const room = database.getRoom(roomId);
         if (!room) { callback({ error: 'Oda bulunamadı' }); return; }
@@ -320,8 +332,10 @@ io.on('connection', (socket) => {
     });
 
     // Join room (viewer)
-    socket.on('join-room', async ({ roomId, password, nickname }, callback) => {
+    socket.on('join-room', async (payload, callback) => {
         if (typeof callback !== 'function') return;
+        const { roomId, password, nickname, checkOnly } = asObject(payload);
+        const isCheckOnly = Boolean(checkOnly) || nickname === undefined || nickname === null;
 
         // Rate limit (password brute-force)
         const blockStatus = rateLimiter.isBlocked(clientIp, roomId);
@@ -334,7 +348,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const result = await roomManager.joinRoom(roomId, socket.id, password, clientIp);
+        const result = await roomManager.joinRoom(roomId, socket.id, password, clientIp, { dryRun: isCheckOnly });
 
         if (result.error) {
             if (result.needPassword && password) {
@@ -352,27 +366,27 @@ io.on('connection', (socket) => {
         }
 
         rateLimiter.resetAttempts(clientIp, roomId);
-        socket.join(roomId);
 
-        // Set nickname if provided (may be absent for lobby-only password check)
-        if (nickname) {
-            const nickErr = RoomManager.validateNickname(nickname);
-            if (nickErr) {
-                // Undo join and return error
-                roomManager.leaveRoom(socket.id);
-                socket.leave(roomId);
-                callback({ error: nickErr });
-                return;
-            }
-            const nickResult = roomManager.setNickname(socket.id, nickname.trim());
-            if (nickResult.error) {
-                roomManager.leaveRoom(socket.id);
-                socket.leave(roomId);
-                callback({ error: nickResult.error });
-                return;
-            }
+        // Lobby access check: do not add phantom "Anonim" member or consume a room slot
+        if (isCheckOnly) {
+            callback(result);
+            return;
         }
 
+        const nickErr = RoomManager.validateNickname(nickname);
+        if (nickErr) {
+            roomManager.leaveRoom(socket.id);
+            callback({ error: nickErr });
+            return;
+        }
+        const nickResult = roomManager.setNickname(socket.id, nickname.trim());
+        if (nickResult.error) {
+            roomManager.leaveRoom(socket.id);
+            callback({ error: nickResult.error });
+            return;
+        }
+
+        socket.join(roomId);
         callback(result);
 
         // Notify room
@@ -395,19 +409,22 @@ io.on('connection', (socket) => {
     });
 
     // Update max users (admin only)
-    socket.on('update-max-users', ({ maxUsers }, callback) => {
+    socket.on('update-max-users', (payload, callback) => {
+        const { maxUsers } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (socketData) {
-            roomManager.updateMaxUsers(socketData.roomId, maxUsers);
-            callback?.({ success: true });
-        }
+        if (!socketData) { callback?.({ error: 'Oda bulunamadı' }); return; }
+        const result = roomManager.updateMaxUsers(socketData.roomId, maxUsers);
+        if (result.error) { callback?.(result); return; }
+        queueRoomUpdate(socketData.roomId);
+        callback?.(result);
     });
 
     // ==================== MODERATION ====================
 
     // Kick user (admin only, viewer can re-join)
-    socket.on('kick-user', ({ targetSocketId }, callback) => {
+    socket.on('kick-user', (payload, callback) => {
+        const { targetSocketId } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 
         const adminData = roomManager.getRoomFromSocket(socket.id);
@@ -445,7 +462,8 @@ io.on('connection', (socket) => {
     });
 
     // Ban user (admin only, IP-based, cannot re-join this room while server running)
-    socket.on('ban-user', ({ targetSocketId }, callback) => {
+    socket.on('ban-user', (payload, callback) => {
+        const { targetSocketId } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 
         const adminData = roomManager.getRoomFromSocket(socket.id);
@@ -487,7 +505,8 @@ io.on('connection', (socket) => {
     // ==================== VIEWER MIC PERMISSION ====================
 
     // Toggle viewer mic permission (admin only)
-    socket.on('toggle-viewer-mic', ({ enabled }, callback) => {
+    socket.on('toggle-viewer-mic', (payload, callback) => {
+        const { enabled } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 
         const socketData = roomManager.getRoomFromSocket(socket.id);
@@ -527,7 +546,8 @@ io.on('connection', (socket) => {
     // Yayıncı içerik türünü değiştirdi. İzleyicilerin oynatma tamponu buna göre
     // ayarlanıyor: 'motion' (film/oyun) → büyük tampon, akıcılık öncelikli;
     // 'detail' (sunum/metin) → küçük tampon, gecikme öncelikli.
-    socket.on('set-content-type', ({ contentType }, callback) => {
+    socket.on('set-content-type', (payload, callback) => {
+        const { contentType } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 
         const socketData = roomManager.getRoomFromSocket(socket.id);
@@ -541,7 +561,8 @@ io.on('connection', (socket) => {
         log.debug(`🎞️ İçerik türü '${value}' (room ${socketData.roomId})`);
     });
 
-    socket.on('toggle-chat', ({ enabled }, callback) => {
+    socket.on('toggle-chat', (payload, callback) => {
+        const { enabled } = asObject(payload);
         if (!roomManager.isAdmin(socket.id)) { callback?.({ error: 'Yetkiniz yok' }); return; }
 
         const socketData = roomManager.getRoomFromSocket(socket.id);
@@ -555,7 +576,8 @@ io.on('connection', (socket) => {
     });
 
     // Send chat message
-    socket.on('chat-message', ({ message }, callback) => {
+    socket.on('chat-message', (payload, callback) => {
+        const { message } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Odaya katılmadınız' }); return; }
 
@@ -586,7 +608,8 @@ io.on('connection', (socket) => {
 
     // ==================== VOICE ACTIVITY ====================
 
-    socket.on('voice-activity', ({ speaking }) => {
+    socket.on('voice-activity', (payload) => {
+        const { speaking } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData) return;
 
@@ -605,7 +628,9 @@ io.on('connection', (socket) => {
         callback(buildIceConfig());
     });
 
-    socket.on('video-capabilities', ({ codecs } = {}, callback) => {
+    socket.on('video-capabilities', (payload, callback) => {
+        if (typeof payload === 'function') { callback = payload; payload = {}; }
+        const { codecs } = asObject(payload);
         const data = roomManager.getRoomFromSocket(socket.id);
         if (!data?.roomState) { callback?.({ error: 'Not in room' }); return; }
         const allowed = ['video/vp8', 'video/h264', 'video/av1', 'video/vp9'];
@@ -623,8 +648,10 @@ io.on('connection', (socket) => {
         callback(socketData.roomState.router.rtpCapabilities);
     });
 
-    socket.on('createWebRtcTransport', async ({ sender }, callback) => {
+    socket.on('createWebRtcTransport', async (payload, callback) => {
+        if (typeof payload === 'function') { callback = payload; payload = {}; }
         if (typeof callback !== 'function') return;
+        const { sender } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback({ params: { error: 'Odaya katılmadınız' } }); return; }
 
@@ -690,9 +717,10 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('transport-connect', async ({ transportId, dtlsParameters }, callback) => {
+    socket.on('transport-connect', async (payload, callback) => {
+        const { transportId, dtlsParameters } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
-        if (!socketData?.roomState) { callback?.({ error: 'Odaya katÄ±lmadÄ±nÄ±z' }); return; }
+        if (!socketData?.roomState) { callback?.({ error: 'Odaya katılmadınız' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
         if (!transport || !ownsTransport(socketData.roomState, transportId, socket.id)) { callback?.({ error: 'Transport bulunamadı' }); return; }
         try {
@@ -704,13 +732,15 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('close-transport', ({ transportId } = {}, callback) => {
+    socket.on('close-transport', (payload, callback) => {
+        const { transportId } = asObject(payload);
         const data = roomManager.getRoomFromSocket(socket.id);
         if (!data?.roomState || !ownsTransport(data.roomState, transportId, socket.id)) { callback?.({ error: 'Transport not found' }); return; }
         findTransport(data.roomState, transportId)?.close(); callback?.({ success: true });
     });
 
-    socket.on('restartIce', async ({ transportId }, callback) => {
+    socket.on('restartIce', async (payload, callback) => {
+        const { transportId } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
         const transport = findTransport(socketData.roomState, transportId);
@@ -725,8 +755,9 @@ io.on('connection', (socket) => {
     });
 
     // Produce (admin: any kind; viewer: audio only + viewerMicEnabled)
-    socket.on('transport-produce', async ({ transportId, kind, rtpParameters, appData }, callback) => {
+    socket.on('transport-produce', async (payload, callback) => {
         if (typeof callback !== 'function') return;
+        const { transportId, kind, rtpParameters, appData } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback({ error: 'Odaya katılmadınız' }); return; }
 
@@ -806,8 +837,9 @@ io.on('connection', (socket) => {
         callback(ids);
     });
 
-    socket.on('consume', async ({ transportId, producerId, rtpCapabilities }, callback) => {
+    socket.on('consume', async (payload, callback) => {
         if (typeof callback !== 'function') return;
+        const { transportId, producerId, rtpCapabilities } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback({ params: { error: 'Odaya katılmadınız' } }); return; }
 
@@ -888,7 +920,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('resume', async ({ consumerId }, callback) => {
+    socket.on('resume', async (payload, callback) => {
+        const { consumerId } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
@@ -908,7 +941,8 @@ io.on('connection', (socket) => {
         } else callback?.({ error: 'Consumer not found' });
     });
 
-    socket.on('setPreferredLayers', async ({ consumerId, spatialLayer, temporalLayer }, callback) => {
+    socket.on('setPreferredLayers', async (payload, callback) => {
+        const { consumerId, spatialLayer, temporalLayer } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
@@ -930,7 +964,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('setAutoLayers', async ({ consumerId }, callback) => {
+    socket.on('setAutoLayers', async (payload, callback) => {
+        const { consumerId } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) { callback?.({ error: 'Not in room' }); return; }
 
@@ -954,7 +989,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('requestKeyFrame', async ({ consumerId }) => {
+    socket.on('requestKeyFrame', async (payload) => {
+        const { consumerId } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) return;
         const consumerData = socketData.roomState.consumers.get(consumerId);
@@ -963,7 +999,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('producer-closing', ({ producerId }) => {
+    socket.on('producer-closing', (payload) => {
+        const { producerId } = asObject(payload);
         const socketData = roomManager.getRoomFromSocket(socket.id);
         if (!socketData?.roomState) return;
 

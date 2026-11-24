@@ -1790,8 +1790,17 @@ btnCloseRoom.addEventListener('click', () => {
 });
 
 btnUpdateMaxUsers.addEventListener('click', () => {
-    socket.emit('update-max-users', { maxUsers: parseInt(maxUsersInput.value) }, (result) => {
-        if (result?.success) showToast('Limit güncellendi', 'success');
+    const maxUsers = Number.parseInt(maxUsersInput.value, 10);
+    if (!Number.isInteger(maxUsers) || maxUsers < 2 || maxUsers > 1000) {
+        showToast('Maksimum kullanıcı 2-1000 arasında olmalı');
+        return;
+    }
+    socket.emit('update-max-users', { maxUsers }, (result) => {
+        if (result?.error) showToast(result.error);
+        else if (result?.success) {
+            maxUsersInput.value = String(result.maxUsers ?? maxUsers);
+            showToast('Limit güncellendi', 'success');
+        }
     });
 });
 

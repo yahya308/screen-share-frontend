@@ -11,6 +11,7 @@ class RateLimiter {
         this.attempts = new Map();
         this.MAX_ATTEMPTS = 5;
         this.BLOCK_DURATION = 3 * 60 * 1000; // 3 minutes
+        this.ATTEMPT_TTL = 15 * 60 * 1000;   // 15 minutes for unblocked failed attempts
 
         // Cleanup expired entries every 5 minutes.
         // unref: bu zamanlayıcı tek başına süreci ayakta tutmasın (testler ve
@@ -59,19 +60,22 @@ class RateLimiter {
      * Record a failed attempt
      * @returns {Object} { blocked: boolean, remainingAttempts: number, remainingTime: number }
      */
-    recordFailedAttempt(ip, roomId) {
+    recordFailedAttempt(ip, roomId, now = Date.now()) {
         const key = this.getKey(ip, roomId);
         let record = this.attempts.get(key);
 
         if (!record) {
-            record = { attempts: 0, blockedUntil: null };
+            record = { attempts: 0, blockedUntil: null, lastAttemptAt: now };
             this.attempts.set(key, record);
+        } else if (!record.blockedUntil && record.lastAttemptAt && now - record.lastAttemptAt >= this.ATTEMPT_TTL) {
+            record.attempts = 0;
         }
 
         record.attempts++;
+        record.lastAttemptAt = now;
 
         if (record.attempts >= this.MAX_ATTEMPTS) {
-            record.blockedUntil = Date.now() + this.BLOCK_DURATION;
+            record.blockedUntil = now + this.BLOCK_DURATION;
             log.info(`🚫 IP ${ip} blocked for room ${roomId} for 3 minutes`);
             return {
                 blocked: true,
@@ -96,12 +100,24 @@ class RateLimiter {
     }
 
     /**
+     * Remove all tracked entries for a closed room
+     */
+    clearRoom(roomId) {
+        if (!roomId) return;
+        const suffix = `:${roomId}`;
+        for (const key of this.attempts.keys()) {
+            if (key.endsWith(suffix)) this.attempts.delete(key);
+        }
+    }
+
+    /**
      * Cleanup expired records
      */
-    cleanup() {
-        const now = Date.now();
+    cleanup(now = Date.now()) {
         for (const [key, record] of this.attempts.entries()) {
             if (record.blockedUntil && now >= record.blockedUntil) {
+                this.attempts.delete(key);
+            } else if (!record.blockedUntil && record.lastAttemptAt && now - record.lastAttemptAt >= this.ATTEMPT_TTL) {
                 this.attempts.delete(key);
             }
         }

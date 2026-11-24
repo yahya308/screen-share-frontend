@@ -72,3 +72,26 @@ test('kalan süre saniye cinsinden ve pozitif raporlanır', () => {
     const { remainingTime } = rateLimiter.isBlocked(IP, 'r1');
     assert.ok(remainingTime > 0 && remainingTime <= 180, `beklenmeyen süre: ${remainingTime}`);
 });
+
+test('cleanup bloklanmamış ama süresi geçmiş eski denemeleri de temizler', () => {
+    const t0 = 1_000_000;
+    rateLimiter.recordFailedAttempt('3.3.3.3', 'r1', t0);
+    rateLimiter.recordFailedAttempt('4.4.4.4', 'r1', t0 + rateLimiter.ATTEMPT_TTL - 1000);
+
+    rateLimiter.cleanup(t0 + rateLimiter.ATTEMPT_TTL);
+
+    assert.equal(rateLimiter.attempts.has('3.3.3.3:r1'), false, 'bayat kısmi deneme silinmeli');
+    assert.equal(rateLimiter.attempts.has('4.4.4.4:r1'), true, 'taze kısmi deneme korunmalı');
+});
+
+test('clearRoom ilgili odanın tüm kayıtlarını temizler', () => {
+    rateLimiter.recordFailedAttempt('1.1.1.1', 'oda-1');
+    rateLimiter.recordFailedAttempt('2.2.2.2', 'oda-1');
+    rateLimiter.recordFailedAttempt('1.1.1.1', 'oda-2');
+
+    rateLimiter.clearRoom('oda-1');
+
+    assert.equal(rateLimiter.attempts.has('1.1.1.1:oda-1'), false);
+    assert.equal(rateLimiter.attempts.has('2.2.2.2:oda-1'), false);
+    assert.equal(rateLimiter.attempts.has('1.1.1.1:oda-2'), true);
+});

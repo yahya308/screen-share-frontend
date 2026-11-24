@@ -45,6 +45,7 @@ print_step "Configuring firewall rules..."
 iptables -I INPUT -p tcp --dport 80 -j ACCEPT
 iptables -I INPUT -p tcp --dport 443 -j ACCEPT
 iptables -I INPUT -p udp --dport 40000:49999 -j ACCEPT
+iptables -I INPUT -p tcp --dport 40000:49999 -j ACCEPT
 
 # Save iptables rules
 if command -v netfilter-persistent &> /dev/null; then

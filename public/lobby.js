@@ -40,10 +40,11 @@ async function initSocket() {
     // tüm listeyi yeniden çizmek yerine yalnızca ilgili kartı yamalıyoruz.
     socket.on('rooms-updated', (updates) => {
         if (!Array.isArray(updates)) return;
-        updates.forEach(({ id, userCount }) => {
+        updates.forEach(({ id, userCount, max_users }) => {
             const room = rooms.get(id);
             if (!room) return;
             room.userCount = userCount;
+            if (Number.isFinite(max_users)) room.max_users = max_users;
             patchRoomCard(room);
         });
     });
@@ -180,7 +181,7 @@ function handleRoomClick(room) {
 // ==================== JOIN ROOM ====================
 
 function joinRoom(roomId, password = null) {
-    socket.emit('join-room', { roomId, password }, (result) => {
+    socket.emit('join-room', { roomId, password, checkOnly: true }, (result) => {
         if (result.error) {
             if (result.blocked) {
                 showToast(`${result.error}`, 5000);
@@ -205,11 +206,22 @@ function joinRoom(roomId, password = null) {
 
 // ==================== CREATE ROOM ====================
 
+function validateNicknameClient(nick) {
+    if (!nick || !nick.trim()) return 'Nickname gerekli';
+    const t = nick.trim();
+    if (t.length < 3) return 'Nickname en az 3 karakter olmalı';
+    if (t.length > 30) return 'Nickname en fazla 30 karakter olmalı';
+    if (/\s/.test(t)) return 'Nickname boşluk içeremez';
+    if (/^[0-9]+$/.test(t)) return 'Nickname yalnızca rakamlardan oluşamaz';
+    if (!/^[a-zA-Z0-9\u00c0-\u024f_-]+$/.test(t)) return 'Nickname sadece harf, rakam, _ ve - içerebilir';
+    return null;
+}
+
 btnCreateRoom.addEventListener('click', () => {
     roomNameInput.value = '';
     createNicknameInput.value = sessionStorage.getItem('velo_nickname') || '';
     roomPasswordInput.value = '';
-    roomMaxUsersInput.value = '8';
+    roomMaxUsersInput.value = '100';
     createModal.classList.remove('hidden');
     createModal.classList.add('flex');
     if(createNicknameInput.value) {
@@ -228,20 +240,26 @@ btnConfirmCreate.addEventListener('click', () => {
     const name = roomNameInput.value.trim();
     const nickname = createNicknameInput.value.trim();
     const password = roomPasswordInput.value.trim() || null;
-    const maxUsers = parseInt(roomMaxUsersInput.value) || 8;
+    const maxUsers = Number.parseInt(roomMaxUsersInput.value, 10);
 
-    if (!name) {
-        showToast('Oda adı gerekli');
+    if (name.length < 3 || name.length > 50) {
+        showToast('Oda adı 3-50 karakter olmalı');
         return;
     }
 
-    if (!nickname) {
-        showToast('Nickname gerekli');
+    const nickErr = validateNicknameClient(nickname);
+    if (nickErr) {
+        showToast(nickErr);
         return;
     }
 
-    if (nickname.length < 3 || nickname.length > 30) {
-        showToast('Nickname 3-30 karakter arası olmalı');
+    if (password && (password.length < 4 || password.length > 64)) {
+        showToast('Şifre 4-64 karakter olmalı');
+        return;
+    }
+
+    if (!Number.isInteger(maxUsers) || maxUsers < 2 || maxUsers > 1000) {
+        showToast('Maksimum kullanıcı 2-1000 arasında olmalı');
         return;
     }
 

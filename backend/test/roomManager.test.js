@@ -268,3 +268,55 @@ test('film moduna geçildiğinde katılanlar film modunu görür', async () => {
     const joined = await rm.joinRoom(roomId, 'viewer-2', null, '1.2.3.5');
     assert.equal(joined.contentType, 'motion');
 });
+
+test('updateMaxUsers geçersiz değerleri reddeder ve odayı kilitlemez', async () => {
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'Limit Testi', adminSocketId: ADMIN, maxUsers: 10 });
+
+    for (const invalid of [null, undefined, NaN, '', 'abc', 0, 1, -5, 1001, 5.5]) {
+        const res = rm.updateMaxUsers(roomId, invalid);
+        assert.match(res.error || '', /2-1000/, `geçersiz değer reddedilmeliydi: ${invalid}`);
+    }
+    assert.equal(database.getRoom(roomId).max_users, 10, 'veritabanındaki limit bozulmamalı');
+    assert.equal((await rm.joinRoom(roomId, 'v1', null, '1.1.1.1')).success, true, 'odaya hâlâ girilebilmeli');
+
+    const ok = rm.updateMaxUsers(roomId, 25);
+    assert.equal(ok.success, true);
+    assert.equal(ok.maxUsers, 25);
+    assert.equal(database.getRoom(roomId).max_users, 25);
+});
+
+test('joinRoom dryRun modunda üyelik eklemez ve kapasite tüketmez', async () => {
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'İki Kişilik', password: 'gizli', adminSocketId: ADMIN, maxUsers: 2 });
+
+    const wrong = await rm.joinRoom(roomId, 'lobby-sock', 'hatali', '1.1.1.1', { dryRun: true });
+    assert.equal(wrong.needPassword, true);
+
+    const check = await rm.joinRoom(roomId, 'lobby-sock', 'gizli', '1.1.1.1', { dryRun: true });
+    assert.equal(check.success, true);
+    assert.equal(rm.getRoomUserCount(roomId), 1, 'dryRun üye sayısını artırmamalı');
+    assert.equal(rm.socketRooms.has('lobby-sock'), false, 'dryRun soketi kaydetmemeli');
+
+    const realJoin = await rm.joinRoom(roomId, 'room-sock', 'gizli', '1.1.1.1');
+    assert.equal(realJoin.success, true);
+    assert.equal(rm.getRoomUserCount(roomId), 2);
+});
+
+test('leaveRoom ve closeRoom sohbet hız sınırı kayıtlarını temizler', async () => {
+    const rm = freshManager();
+    const { roomId } = await rm.createRoom({ name: 'Temizlik', adminSocketId: ADMIN });
+    await rm.joinRoom(roomId, 'v1', null, '1.1.1.1');
+    await rm.joinRoom(roomId, 'v2', null, '2.2.2.2');
+
+    rm.checkChatRateLimit('v1');
+    rm.checkChatRateLimit('v2');
+    assert.equal(rm.chatRateLimits.has('v1'), true);
+    assert.equal(rm.chatRateLimits.has('v2'), true);
+
+    rm.leaveRoom('v1');
+    assert.equal(rm.chatRateLimits.has('v1'), false, 'ayrılan soketin kaydı silinmeli');
+
+    rm.closeRoom(roomId);
+    assert.equal(rm.chatRateLimits.has('v2'), false, 'kapanan odadaki soketlerin kaydı silinmeli');
+});

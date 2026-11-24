@@ -5,6 +5,7 @@
 const { v4: uuidv4 } = require('uuid');
 const database = require('./database');
 const adminAuth = require('./adminAuth');
+const rateLimiter = require('./RateLimiter');
 const log = require('./logger');
 
 const MAX_ROOMS = 50;
@@ -212,8 +213,10 @@ class RoomManager {
             return { error: `Oda adı ${ROOM_NAME_MIN}-${ROOM_NAME_MAX} karakter olmalı` };
         }
 
-        const requestedMaxUsers = Number.isFinite(Number(maxUsers)) ? Number(maxUsers) : 100;
-        if (requestedMaxUsers < MAX_USERS_MIN || requestedMaxUsers > MAX_USERS_MAX) {
+        const requestedMaxUsers = maxUsers === undefined || maxUsers === null || maxUsers === ''
+            ? 100
+            : Number(maxUsers);
+        if (!Number.isInteger(requestedMaxUsers) || requestedMaxUsers < MAX_USERS_MIN || requestedMaxUsers > MAX_USERS_MAX) {
             return { error: `Maksimum kullanıcı ${MAX_USERS_MIN}-${MAX_USERS_MAX} arasında olmalı` };
         }
 
@@ -278,7 +281,7 @@ class RoomManager {
         this.addMember(roomId, adminSocketId, 'admin');
 
         log.info(`🏠 Room created: ${name} (${roomId}) on Worker ${workerIndex}`);
-        return { roomId, workerIndex, isPublic: !password, adminToken };
+        return { roomId, workerIndex, isPublic: !password, adminToken, maxUsers: requestedMaxUsers };
     }
 
     /** Bu IP'nin şu anda açık kaç odası var? */
@@ -331,7 +334,7 @@ class RoomManager {
         this.pendingAdminJoin.set(roomId, t);
     }
 
-    async joinRoom(roomId, socketId, password, clientIp) {
+    async joinRoom(roomId, socketId, password, clientIp, { dryRun = false } = {}) {
         if (!roomId || typeof roomId !== 'string' || roomId.length > 100) {
             return { error: 'Geçersiz oda kimliği' };
         }
@@ -360,6 +363,21 @@ class RoomManager {
         const currentUsers = this.getRoomUserCount(roomId);
         if (currentUsers >= room.max_users) return { error: 'Oda dolu' };
 
+        if (dryRun) {
+            return {
+                success: true,
+                roomId,
+                roomName: room.name,
+                isStreaming: roomState.isStreaming,
+                viewerMicEnabled: roomState.viewerMicEnabled,
+                chatEnabled: roomState.chatEnabled,
+                contentType: roomState.contentType || 'detail',
+                workerIndex: room.worker_index,
+                maxUsers: room.max_users,
+                userCount: currentUsers
+            };
+        }
+
         this.socketRooms.set(socketId, { roomId, role: 'viewer', nickname: '', ip: clientIp });
         this.addMember(roomId, socketId, 'viewer');
 
@@ -382,6 +400,7 @@ class RoomManager {
 
     leaveRoom(socketId) {
         const socketData = this.socketRooms.get(socketId);
+        this.chatRateLimits.delete(socketId);
         if (!socketData) return null;
 
         const { roomId, role } = socketData;
@@ -481,9 +500,13 @@ class RoomManager {
         this.rooms.delete(roomId);
         this.roomUsers.delete(roomId);
         this.bannedIps.delete(roomId);
+        rateLimiter.clearRoom(roomId);
 
         for (const [socketId, data] of this.socketRooms) {
-            if (data.roomId === roomId) this.socketRooms.delete(socketId);
+            if (data.roomId === roomId) {
+                this.socketRooms.delete(socketId);
+                this.chatRateLimits.delete(socketId);
+            }
         }
 
         // Zamanlayıcıları yalnızca haritadan silmek yetmez; iptal edilmeyen
@@ -538,7 +561,13 @@ class RoomManager {
     }
 
     updateMaxUsers(roomId, maxUsers) {
-        database.setMaxUsers(roomId, maxUsers);
+        if (!this.rooms.has(roomId)) return { error: 'Oda bulunamadı' };
+        const requestedMaxUsers = Number(maxUsers);
+        if (!Number.isInteger(requestedMaxUsers) || requestedMaxUsers < MAX_USERS_MIN || requestedMaxUsers > MAX_USERS_MAX) {
+            return { error: `Maksimum kullanıcı ${MAX_USERS_MIN}-${MAX_USERS_MAX} arasında olmalı` };
+        }
+        database.setMaxUsers(roomId, requestedMaxUsers);
+        return { success: true, maxUsers: requestedMaxUsers };
     }
 
     /** Update admin socket after rejoin */

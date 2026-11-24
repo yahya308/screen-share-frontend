@@ -136,3 +136,78 @@ test('lobby-unsubscribe sonrası bildirim durur', async () => {
 
     assert.equal(events.length, 0);
 });
+
+test('lobiden checkOnly join-room hayalet Anonim üretmez ve 2 kişilik odayı tıkamaz', async () => {
+    const creator = await connect();
+    const { roomId, adminToken } = await emit(creator, 'create-room', {
+        name: 'İki Kişilik Oda', password: 'sifre', maxUsers: 2
+    });
+    creator.disconnect();
+    openSockets.delete(creator);
+
+    const admin = await connect();
+    await emit(admin, 'admin-rejoin', { roomId, nickname: 'sahip', adminToken });
+    const userLists = record(admin, 'user-list');
+    const userJoined = record(admin, 'user-joined');
+
+    // Lobi soketi hâlâ bağlıyken oda sayfası yeni soketle katılır (maxUsers = 2)
+    const lobbySocket = await connect();
+    const check = await emit(lobbySocket, 'join-room', { roomId, password: 'sifre', checkOnly: true });
+    assert.equal(check.success, true);
+
+    await wait(100);
+    assert.equal(userJoined.length, 0, 'lobi kontrolü user-joined yaymamalı');
+    assert.equal(userLists.some(list => list.some(u => u.nickname === 'Anonim')), false, 'Anonim görünmemeli');
+
+    const viewerSocket = await connect();
+    const joined = await emit(viewerSocket, 'join-room', { roomId, password: 'sifre', nickname: 'izleyici' });
+    assert.equal(joined.success, true, 'lobi soketi açıkken bile gerçek izleyici girebilmeli');
+});
+
+test('update-max-users doğrulama yapar ve yeni limiti lobiye bildirir', async () => {
+    const creator = await connect();
+    const { roomId, adminToken } = await emit(creator, 'create-room', { name: 'Limit Güncelleme', maxUsers: 10 });
+    creator.disconnect();
+    openSockets.delete(creator);
+
+    const admin = await connect();
+    await emit(admin, 'admin-rejoin', { roomId, nickname: 'sahip', adminToken });
+
+    const lobby = await connect();
+    await emit(lobby, 'lobby-subscribe');
+    const updates = record(lobby, 'rooms-updated');
+
+    const bad = await emit(admin, 'update-max-users', { maxUsers: null });
+    assert.match(bad.error || '', /2-1000/);
+
+    const ok = await emit(admin, 'update-max-users', { maxUsers: 42 });
+    assert.equal(ok.success, true);
+
+    await wait(1200);
+    const update = updates.flat().find(u => u.id === roomId);
+    assert.ok(update, 'lobi limit değişimini almalı');
+    assert.equal(update.max_users, 42);
+});
+
+test('bozuk (null/ilkel) soket yükleri sunucuyu çökertmez', async () => {
+    const client = await connect();
+    for (const bad of [null, 123, 'metin', []]) {
+        const c1 = await emit(client, 'create-room', bad);
+        assert.ok(c1.error);
+        const c2 = await emit(client, 'join-room', bad);
+        assert.ok(c2.error);
+        const c3 = await emit(client, 'admin-rejoin', bad);
+        assert.ok(c3.error);
+        const c4 = await emit(client, 'createWebRtcTransport', bad);
+        assert.ok(c4.params.error);
+        const c5 = await emit(client, 'consume', bad);
+        assert.ok(c5.params.error);
+        const c6 = await emit(client, 'update-max-users', bad);
+        assert.ok(c6.error);
+    }
+    client.emit('voice-activity', null);
+    client.emit('producer-closing', null);
+    client.emit('requestKeyFrame', null);
+    await wait(50);
+    assert.equal(client.connected, true, 'sunucu ayakta ve soket bağlı kalmalı');
+});
