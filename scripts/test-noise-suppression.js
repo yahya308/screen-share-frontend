@@ -155,33 +155,52 @@ async function measure() {
     out.contextState = ns.context.state;
     out.trackState = ns.track.readyState;
 
-    // Karşılaştırma kanalı: ham iz, işlemcisiz ama aynı türde bir bağlam
-    // geçişinden (AudioContext → iz) geçer. İki kanal aynı kaydedicide:
-    // kaydedici tamponu, başlama anı ve bağlam geçişi ikisinde ortak,
-    // aradaki fark yalnızca worklet tamponu + model gecikmesi.
-    const hopCtx = new AudioContext({ sampleRate: SR, latencyHint: 'interactive' });
-    await hopCtx.resume();
-    const hop = hopCtx.createMediaStreamDestination();
-    hopCtx.createMediaStreamSource(new MediaStream([rawTrack])).connect(hop);
+    // Karşılaştırma kanalı: aynı AudioContext (ns.context) içinde ham izi
+    // doğrudan okur ve ns.node çıktısıyla aynı kaydedicide birleştirir.
+    // Ayrı bir AudioContext (hopCtx) açıldığında işletim sistemi ses iş
+    // parçacıkları arasındaki MediaStream FIFO faz farkı (±10-20 ms) ölçüme
+    // eklenip çıkarılıyor ve CI sanal makinelerinde 32 ms'lik gerçek gecikmeyi
+    // 12 ms ya da 48 ms gibi gösterebiliyordu.
     const recordedRaw = new Float32Array(N + SR), recorded = new Float32Array(N + SR);
     let written = 0;
-    const merger = ctx.createChannelMerger(2);
-    ctx.createMediaStreamSource(hop.stream).connect(merger, 0, 0);
-    ctx.createMediaStreamSource(new MediaStream([ns.track])).connect(merger, 0, 1);
-    const recorder = ctx.createScriptProcessor(4096, 2, 2);
+    const merger = ns.context.createChannelMerger(2);
+    const refSource = ns.context.createMediaStreamSource(new MediaStream([rawTrack]));
+    refSource.connect(merger, 0, 0);
+    ns.node.connect(merger, 0, 1);
+    // Çıkış MediaStreamTrack'inin (ns.track) de gerçekten ses taşıdığını doğrula
+    const trackProbe = ctx.createMediaStreamSource(new MediaStream([ns.track]));
+    const trackAnalyser = ctx.createAnalyser();
+    const trackBuf = new Float32Array(trackAnalyser.fftSize);
+    let trackPeak = 0;
+    const trackMute = ctx.createGain();
+    trackMute.gain.value = 0;
+    trackProbe.connect(trackAnalyser);
+    trackAnalyser.connect(trackMute);
+    trackMute.connect(ctx.destination);
+    const trackPoll = setInterval(() => {
+        trackAnalyser.getFloatTimeDomainData(trackBuf);
+        for (let i = 0; i < trackBuf.length; i++) trackPeak = Math.max(trackPeak, Math.abs(trackBuf[i]));
+    }, 50);
+
+    const recorder = ns.context.createScriptProcessor(4096, 2, 2);
     recorder.onaudioprocess = (e) => {
         const raw = e.inputBuffer.getChannelData(0), processed = e.inputBuffer.getChannelData(1);
         const n = Math.min(raw.length, recorded.length - written);
         if (n > 0) { recordedRaw.set(raw.subarray(0, n), written); recorded.set(processed.subarray(0, n), written); }
         written += n;
     };
-    const mute = ctx.createGain();
+    const mute = ns.context.createGain();
     mute.gain.value = 0;
     merger.connect(recorder);
     recorder.connect(mute);
-    mute.connect(ctx.destination);
+    mute.connect(ns.context.destination);
     player.start();
     await new Promise(r => setTimeout(r, (seconds + 0.8) * 1000));
+    clearInterval(trackPoll);
+    out.trackHasSignal = trackPeak > 0.01;
+    refSource.disconnect();
+    recorder.disconnect();
+    mute.disconnect();
     out.failures = failures;
 
     // ---------- Ölçüm ----------
@@ -214,7 +233,6 @@ async function measure() {
         if (c > latencyBest) { latencyBest = c; latencyLag = lag; }
     }
     out.latencyMs = Math.round(latencyLag / SR * 1000);
-    await hopCtx.close();
 
     // Çerçeve sınıfları: geçişlerden 3 çerçeve uzak konuşma/sessizlik.
     const frameSpeech = new Uint8Array(frames);
@@ -267,7 +285,7 @@ async function measure() {
     console.log(JSON.stringify(r));
     check('Chromium yapay zekâ gürültü engellemeyi destekliyor', r.available);
     if (r.available) {
-        check('model üretim CSP\'si altında yüklenip hazır oluyor', r.trackState === 'live' && r.contextState === 'running', `${r.setupMs} ms`);
+        check('model üretim CSP\'si altında yüklenip hazır oluyor', r.trackState === 'live' && r.contextState === 'running' && r.trackHasSignal, `${r.setupMs} ms`);
         check('işlem sırasında arıza bildirilmiyor', r.failures === 0);
         // Beklenen ≈ 32 ms: 640 örnek worklet tamponu + GTCRN'in ~18 ms'si.
         check('işlemcinin eklediği gecikme 45 ms altında', r.latencyMs >= 10 && r.latencyMs < 45, `${r.latencyMs} ms`);
